@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0
+
+- Add support for `IFEG_95000100` three-stream 16-bit images.
+- Validate the new path against the local Samsung B5722 `IFEG_95000100` corpus.
+- Update codec table notes and format documentation.
+
 ## 0.2.0
 
 - Add PNG output for single-file decoding.

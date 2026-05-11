@@ -11,8 +11,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-VERSION = "0.2.0"
-SUPPORTED_IFEG_TYPE = 0x65000001
+VERSION = "0.3.0"
+IFEG_TYPE_65000001 = 0x65000001
+IFEG_TYPE_95000100 = 0x95000100
 DEFAULT_TABLES_JSON = Path(__file__).resolve().parent / "codec_tables.json"
 SUPPORTED_OUTPUT_FORMATS = ("bmp", "png")
 
@@ -25,8 +26,15 @@ class IfegHeader:
     raw_word_offset: int
 
 
+@dataclass(frozen=True)
+class CodecTables:
+    delta16_simple: list[int]
+    delta16_decode_a: list[int]
+    delta16_decode_b: list[int]
+
+
 class BitReader:
-    """MSB-first bit reader used by the Samsung IFEG 0x65000001 stream."""
+    """MSB-first bit reader used by Samsung IFEG streams."""
 
     def __init__(self, data: bytes, bit_position: int = 0x81) -> None:
         # The original decoder counts bit positions from 1.
@@ -70,23 +78,31 @@ def parse_ifeg_header(data: bytes) -> IfegHeader:
     )
 
 
-def load_delta_table(path: Path = DEFAULT_TABLES_JSON) -> list[int]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
+def load_table(payload: dict[str, object], path: Path, table_name: str) -> list[int]:
     try:
-        values = payload["tables"]["delta16_simple"]["values_signed"]
+        values = payload["tables"][table_name]["values_signed"]
     except KeyError as exc:
-        raise ValueError(f"{path} is missing tables.delta16_simple.values_signed") from exc
+        raise ValueError(f"{path} is missing tables.{table_name}.values_signed") from exc
     if len(values) < 512:
-        raise ValueError(f"{path} delta16_simple table is truncated")
+        raise ValueError(f"{path} {table_name} table is truncated")
     return [int(x) for x in values]
+
+
+def load_codec_tables(path: Path = DEFAULT_TABLES_JSON) -> CodecTables:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    return CodecTables(
+        delta16_simple=load_table(payload, path, "delta16_simple"),
+        delta16_decode_a=load_table(payload, path, "delta16_decode_a"),
+        delta16_decode_b=load_table(payload, path, "delta16_decode_b"),
+    )
 
 
 def decode_ifeg_65000001(data: bytes, delta_table: list[int]) -> tuple[int, int, list[int]]:
     header = parse_ifeg_header(data)
-    if header.ifeg_type != SUPPORTED_IFEG_TYPE:
+    if header.ifeg_type != IFEG_TYPE_65000001:
         raise ValueError(
             f"unsupported IFEG type 0x{header.ifeg_type:08x}; "
-            f"this release supports 0x{SUPPORTED_IFEG_TYPE:08x}"
+            f"expected 0x{IFEG_TYPE_65000001:08x}"
         )
     if header.width <= 0 or header.height <= 0:
         raise ValueError(f"invalid dimensions {header.width}x{header.height}")
@@ -162,6 +178,124 @@ def decode_ifeg_65000001(data: bytes, delta_table: list[int]) -> tuple[int, int,
             decode_tile(tile_w, tile_h, base_index)
 
     return header.width, header.height, pixels
+
+
+def decode_ifeg_95000100(data: bytes, tables: CodecTables) -> tuple[int, int, list[int]]:
+    header = parse_ifeg_header(data)
+    if header.ifeg_type != IFEG_TYPE_95000100:
+        raise ValueError(
+            f"unsupported IFEG type 0x{header.ifeg_type:08x}; "
+            f"expected 0x{IFEG_TYPE_95000100:08x}"
+        )
+    if header.width <= 0 or header.height <= 0:
+        raise ValueError(f"invalid dimensions {header.width}x{header.height}")
+    if len(data) < 29:
+        raise ValueError("file is too small for an IFEG_95000100 stream header")
+    if data[12:16] != b"\x01\x00\x01\x00" or data[16] not in (0, 1):
+        raise ValueError("unsupported IFEG_95000100 stream header")
+
+    split_b = read_u32le(data, 21)
+    split_c = read_u32le(data, 25)
+    stream_start = 29
+    if not (stream_start <= split_b <= split_c <= len(data)):
+        raise ValueError(f"invalid IFEG_95000100 stream split points: {split_b}, {split_c}")
+
+    control_bits = BitReader(data[stream_start : split_b + 4], bit_position=1)
+    command_bits = BitReader(data[split_b : split_c + 4], bit_position=1)
+    raw_words = data[split_c:]
+    raw_cursor = 0
+    pixels = [0] * (header.width * header.height)
+
+    blocks_w = (header.width + 3) // 4
+    blocks_h = (header.height + 3) // 4
+    width_rem = header.width % 4
+    height_rem = header.height % 4
+
+    def get_pixel(index: int) -> int:
+        if 0 <= index < len(pixels):
+            return pixels[index]
+        return 0
+
+    def set_pixel(index: int, value: int) -> None:
+        if 0 <= index < len(pixels):
+            pixels[index] = value & 0xFFFF
+
+    def read_raw_word() -> int:
+        nonlocal raw_cursor
+        if raw_cursor + 2 > len(raw_words):
+            raise EOFError(f"raw word read past end at byte {raw_cursor}")
+        value = read_u16le(raw_words, raw_cursor)
+        raw_cursor += 2
+        return value
+
+    def decode_mixed_tile(tile_w: int, tile_h: int, base_index: int, reference_distance: int, table_flag: int) -> None:
+        mask = read_raw_word()
+        mask_bit = 0
+        delta_table = tables.delta16_decode_a if table_flag else tables.delta16_decode_b
+
+        for yy in range(tile_h):
+            for xx in range(tile_w):
+                dst_index = base_index + xx + yy * header.width
+                src_index = base_index - reference_distance + xx + yy * header.width
+
+                if mask & (1 << mask_bit):
+                    set_pixel(dst_index, get_pixel(src_index))
+                    mask_bit += 1
+                    continue
+
+                code = command_bits.read(3)
+                if code == 7:
+                    set_pixel(dst_index, read_raw_word())
+                else:
+                    extra = control_bits.read(code + 1)
+                    table_index = (2 << code) + extra
+                    if table_index >= len(delta_table):
+                        raise ValueError(f"delta table index out of range: {table_index}")
+                    set_pixel(dst_index, get_pixel(src_index) + delta_table[table_index])
+                mask_bit += 1
+
+    def decode_raw_tile(tile_w: int, tile_h: int, base_index: int) -> None:
+        for yy in range(tile_h):
+            for xx in range(tile_w):
+                set_pixel(base_index + xx + yy * header.width, read_raw_word())
+
+    def decode_tile(tile_w: int, tile_h: int, base_index: int) -> None:
+        mode = control_bits.read(3)
+        if mode == 0:
+            decode_mixed_tile(tile_w, tile_h, base_index, 1, control_bits.read(1))
+        elif mode == 1:
+            decode_mixed_tile(tile_w, tile_h, base_index, header.width, control_bits.read(1))
+        elif mode == 2:
+            decode_mixed_tile(tile_w, tile_h, base_index, header.width + 1, control_bits.read(1))
+        elif mode == 3:
+            for yy in range(tile_h):
+                for xx in range(tile_w):
+                    src_index = base_index - 1 + xx + yy * header.width
+                    dst_index = base_index + xx + yy * header.width
+                    set_pixel(dst_index, get_pixel(src_index))
+        elif mode == 4:
+            decode_raw_tile(tile_w, tile_h, base_index)
+        else:
+            raise ValueError(f"unsupported IFEG_95000100 tile mode: {mode}")
+
+    for block_y in range(blocks_h):
+        tile_h = height_rem if block_y == blocks_h - 1 and height_rem else 4
+        for block_x in range(blocks_w):
+            tile_w = width_rem if block_x == blocks_w - 1 and width_rem else 4
+            base_index = block_y * header.width * 4 + block_x * 4
+            decode_tile(tile_w, tile_h, base_index)
+
+    return header.width, header.height, pixels
+
+
+def decode_ifeg(data: bytes, tables: CodecTables) -> tuple[int, int, list[int]]:
+    header = parse_ifeg_header(data)
+    if header.ifeg_type == IFEG_TYPE_65000001:
+        return decode_ifeg_65000001(data, tables.delta16_simple)
+    if header.ifeg_type == IFEG_TYPE_95000100:
+        return decode_ifeg_95000100(data, tables)
+    supported = ", ".join(f"0x{item:08x}" for item in (IFEG_TYPE_65000001, IFEG_TYPE_95000100))
+    raise ValueError(f"unsupported IFEG type 0x{header.ifeg_type:08x}; this release supports {supported}")
 
 
 def rgb565_to_rgb888(value: int, bgr565: bool = False) -> tuple[int, int, int]:
@@ -268,13 +402,13 @@ def iter_input_files(input_path: Path, recursive: bool) -> list[Path]:
 def decode_one_file(
     input_path: Path,
     output_path: Path,
-    delta_table: list[int],
+    tables: CodecTables,
     bgr565: bool,
     split_panels: bool,
 ) -> dict[str, str]:
     data = input_path.read_bytes()
     header = parse_ifeg_header(data)
-    width, height, pixels = decode_ifeg_65000001(data, delta_table)
+    width, height, pixels = decode_ifeg(data, tables)
     write_image_rgb888(output_path, width, height, pixels, bgr565=bgr565)
 
     extra_outputs: list[str] = []
@@ -321,7 +455,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_arg_parser().parse_args(argv)
-    delta_table = load_delta_table(args.tables)
+    tables = load_codec_tables(args.tables)
 
     input_path = args.input
     output_path = args.output
@@ -340,7 +474,7 @@ def main(argv: list[str] | None = None) -> int:
     rows: list[dict[str, str]] = []
     for source, target in planned_outputs.items():
         try:
-            row = decode_one_file(source, target, delta_table, args.bgr565, args.split_240x320_panels)
+            row = decode_one_file(source, target, tables, args.bgr565, args.split_240x320_panels)
             print(f"decoded {source} -> {target} ({row['width']}x{row['height']})")
         except Exception as exc:
             row = {
