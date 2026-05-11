@@ -10,7 +10,7 @@ Supported:
 
 - `IFEG` magic: `49 46 45 47`
 - Type: `0x65000001`
-- Output: 24-bit `.bmp`
+- Output: 24-bit `.bmp` or `.png`
 - Single-file decode
 - Folder/batch decode
 - Optional split of `240x960` idle wallpapers into `240x320` panels
@@ -22,7 +22,6 @@ Not supported yet:
 - `IM`
 - `QM` / QMG
 - Encoding BMP/JPG back to IFG
-- PNG output
 
 ## Requirements
 
@@ -37,10 +36,22 @@ Decode one file:
 python samsung_ifg_decoder.py input.ifg output.bmp
 ```
 
+Decode one file as PNG:
+
+```bash
+python samsung_ifg_decoder.py input.ifg output.png
+```
+
 Decode a folder:
 
 ```bash
 python samsung_ifg_decoder.py input_folder output_folder
+```
+
+Decode a folder as PNG:
+
+```bash
+python samsung_ifg_decoder.py input_folder output_folder --format png
 ```
 
 Decode a folder recursively:
@@ -86,7 +97,6 @@ Users must provide their own `.ifg` files. This project is intended for preserva
 
 ## Roadmap
 
-- Add PNG output.
 - Add support for `IFEG_95000100`.
 - Add support for `IFEG_150001xx`.
 - Add support for `IM`.

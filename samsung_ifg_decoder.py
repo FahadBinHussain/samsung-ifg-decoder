@@ -6,13 +6,15 @@ import csv
 import json
 import struct
 import sys
+import zlib
 from dataclasses import dataclass
 from pathlib import Path
 
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 SUPPORTED_IFEG_TYPE = 0x65000001
 DEFAULT_TABLES_JSON = Path(__file__).resolve().parent / "codec_tables.json"
+SUPPORTED_OUTPUT_FORMATS = ("bmp", "png")
 
 
 @dataclass(frozen=True)
@@ -162,6 +164,22 @@ def decode_ifeg_65000001(data: bytes, delta_table: list[int]) -> tuple[int, int,
     return header.width, header.height, pixels
 
 
+def rgb565_to_rgb888(value: int, bgr565: bool = False) -> tuple[int, int, int]:
+    value &= 0xFFFF
+    if bgr565:
+        b5 = (value >> 11) & 0x1F
+        g6 = (value >> 5) & 0x3F
+        r5 = value & 0x1F
+    else:
+        r5 = (value >> 11) & 0x1F
+        g6 = (value >> 5) & 0x3F
+        b5 = value & 0x1F
+    r = (r5 << 3) | (r5 >> 2)
+    g = (g6 << 2) | (g6 >> 4)
+    b = (b5 << 3) | (b5 >> 2)
+    return r, g, b
+
+
 def write_bmp_rgb888(path: Path, width: int, height: int, pixels: list[int], bgr565: bool = False) -> None:
     row_stride = (width * 3 + 3) & ~3
     pixel_bytes = bytearray(row_stride * height)
@@ -170,18 +188,7 @@ def write_bmp_rgb888(path: Path, width: int, height: int, pixels: list[int], bgr
         dst_y = height - 1 - y
         row_off = dst_y * row_stride
         for x in range(width):
-            value = pixels[y * width + x] & 0xFFFF
-            if bgr565:
-                b5 = (value >> 11) & 0x1F
-                g6 = (value >> 5) & 0x3F
-                r5 = value & 0x1F
-            else:
-                r5 = (value >> 11) & 0x1F
-                g6 = (value >> 5) & 0x3F
-                b5 = value & 0x1F
-            r = (r5 << 3) | (r5 >> 2)
-            g = (g6 << 2) | (g6 >> 4)
-            b = (b5 << 3) | (b5 >> 2)
+            r, g, b = rgb565_to_rgb888(pixels[y * width + x], bgr565=bgr565)
             out = row_off + x * 3
             pixel_bytes[out : out + 3] = bytes((b, g, r))
 
@@ -194,6 +201,37 @@ def write_bmp_rgb888(path: Path, width: int, height: int, pixels: list[int], bgr
     path.write_bytes(header + pixel_bytes)
 
 
+def png_chunk(chunk_type: bytes, payload: bytes) -> bytes:
+    return struct.pack(">I", len(payload)) + chunk_type + payload + struct.pack(">I", zlib.crc32(chunk_type + payload) & 0xFFFFFFFF)
+
+
+def write_png_rgb888(path: Path, width: int, height: int, pixels: list[int], bgr565: bool = False) -> None:
+    scanlines = bytearray()
+    for y in range(height):
+        scanlines.append(0)
+        for x in range(width):
+            scanlines.extend(rgb565_to_rgb888(pixels[y * width + x], bgr565=bgr565))
+
+    payload = bytearray()
+    payload += b"\x89PNG\r\n\x1a\n"
+    payload += png_chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+    payload += png_chunk(b"IDAT", zlib.compress(bytes(scanlines)))
+    payload += png_chunk(b"IEND", b"")
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(payload)
+
+
+def write_image_rgb888(path: Path, width: int, height: int, pixels: list[int], bgr565: bool = False) -> None:
+    suffix = path.suffix.lower()
+    if suffix == ".bmp":
+        write_bmp_rgb888(path, width, height, pixels, bgr565=bgr565)
+    elif suffix == ".png":
+        write_png_rgb888(path, width, height, pixels, bgr565=bgr565)
+    else:
+        raise ValueError(f"unsupported output extension {path.suffix!r}; use .bmp or .png")
+
+
 def split_240x320_panels(output_path: Path, width: int, height: int, pixels: list[int], bgr565: bool) -> list[Path]:
     if width != 240 or height % 320 != 0:
         return []
@@ -204,17 +242,18 @@ def split_240x320_panels(output_path: Path, width: int, height: int, pixels: lis
         for y in range(320):
             row_start = (panel_index * 320 + y) * width
             panel_pixels.extend(pixels[row_start : row_start + width])
-        panel_path = output_path.with_name(f"{output_path.stem}_panel{panel_index + 1}_240x320.bmp")
-        write_bmp_rgb888(panel_path, 240, 320, panel_pixels, bgr565=bgr565)
+        panel_path = output_path.with_name(f"{output_path.stem}_panel{panel_index + 1}_240x320{output_path.suffix}")
+        write_image_rgb888(panel_path, 240, 320, panel_pixels, bgr565=bgr565)
         panel_paths.append(panel_path)
     return panel_paths
 
 
-def default_output_for_file(input_path: Path, input_root: Path | None, output_root: Path) -> Path:
+def default_output_for_file(input_path: Path, input_root: Path | None, output_root: Path, output_format: str) -> Path:
+    suffix = f".{output_format}"
     if input_root is None:
-        return output_root / f"{input_path.stem}.bmp"
+        return output_root / f"{input_path.stem}{suffix}"
     rel = input_path.relative_to(input_root)
-    return (output_root / rel).with_suffix(".bmp")
+    return (output_root / rel).with_suffix(suffix)
 
 
 def iter_input_files(input_path: Path, recursive: bool) -> list[Path]:
@@ -236,7 +275,7 @@ def decode_one_file(
     data = input_path.read_bytes()
     header = parse_ifeg_header(data)
     width, height, pixels = decode_ifeg_65000001(data, delta_table)
-    write_bmp_rgb888(output_path, width, height, pixels, bgr565=bgr565)
+    write_image_rgb888(output_path, width, height, pixels, bgr565=bgr565)
 
     extra_outputs: list[str] = []
     if split_panels:
@@ -269,9 +308,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "This release supports IFEG type 0x65000001."
     )
     parser.add_argument("input", type=Path, help="input .ifg file or folder")
-    parser.add_argument("output", type=Path, help="output .bmp file, or output folder for batch mode")
+    parser.add_argument("output", type=Path, help="output .bmp/.png file, or output folder for batch mode")
     parser.add_argument("--recursive", action="store_true", help="recurse into input folders")
     parser.add_argument("--tables", type=Path, default=DEFAULT_TABLES_JSON, help="codec table JSON path")
+    parser.add_argument("--format", choices=SUPPORTED_OUTPUT_FORMATS, default="bmp", help="batch output format")
     parser.add_argument("--bgr565", action="store_true", help="interpret decoded 16-bit pixels as BGR565")
     parser.add_argument("--split-240x320-panels", action="store_true", help="also split 240x960 wallpapers into 240x320 panels")
     parser.add_argument("--manifest", type=Path, help="write a CSV decode manifest")
@@ -293,7 +333,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         input_root = input_path if input_path.is_dir() else None
         planned_outputs = {
-            path: default_output_for_file(path, input_root, output_path)
+            path: default_output_for_file(path, input_root, output_path, args.format)
             for path in input_files
         }
 

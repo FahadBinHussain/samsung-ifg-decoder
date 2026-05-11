@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.0
+
+- Add PNG output for single-file decoding.
+- Add `--format png` for folder/batch decoding.
+- Split wallpaper panels now use the selected output extension.
+
 ## 0.1.0
 
 - Initial public release scaffold.
