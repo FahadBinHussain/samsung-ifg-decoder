@@ -1,6 +1,6 @@
 # Format Notes
 
-These notes document the currently implemented Samsung `IFEG_65000001`, `IFEG_95000100`, and `IFEG_150001xx` paths. They are incomplete and will change as more IFG variants are decoded.
+These notes document the currently implemented Samsung `IFEG_65000001`, `IFEG_95000100`, `IFEG_150001xx`, and `IM_0x5D` paths. They are incomplete and will change as more IFG variants are decoded.
 
 ## IFEG Header
 
@@ -15,6 +15,28 @@ These notes document the currently implemented Samsung `IFEG_65000001`, `IFEG_95
 | `0x0c` | varies | subtype-specific payload metadata |
 
 This decoder currently supports types `0x65000001`, `0x95000100`, and the `0x150001xx` family.
+
+## IM 0x5D Header
+
+Observed B5722 `IM` files begin with:
+
+| Offset | Size | Meaning |
+| ---: | ---: | --- |
+| `0x00` | 2 | ASCII magic `IM` |
+| `0x02` | 2 | width, little-endian `u16` |
+| `0x04` | 2 | height, little-endian `u16` |
+| `0x06` | 1 | flags; bit `0x20` selects the near-lossless/raw-flag pixel path |
+| `0x07` | 1 | version; supported value `0x5D` |
+| `0x08` | 1 | layout flags; bit `0x40` moves the stream header from `0x09` to `0x0d` |
+
+For non-alpha `IM_0x5D` files, the stream header contains two little-endian split points:
+
+| Layout | Stream header | Control stream | Command stream | Raw/mask stream |
+| --- | ---: | ---: | ---: | ---: |
+| `data[0x08] & 0x40 == 0` | `0x09` | `0x11` | `u32 @ 0x09` | `u32 @ 0x0d` |
+| `data[0x08] & 0x40 != 0` | `0x0d` | `0x15` | `u32 @ 0x0d` | `u32 @ 0x11` |
+
+`IM` files with the high bit set in `data[0x06]` appear to include alpha-plane metadata and are not implemented yet.
 
 ## Tile Layout
 
@@ -86,6 +108,27 @@ codec_tables.json -> tables.delta16_decode_a.values_signed
 codec_tables.json -> tables.delta16_decode_b.values_signed
 ```
 
+## IM 0x5D V-Codec Stream
+
+The implemented `IM_0x5D` path uses the same `4x4` tile grid. Each tile starts with a 2-bit mode from the control stream:
+
+| Mode | Meaning |
+| ---: | --- |
+| `0` | mixed tile using reference distance `1` |
+| `1` | mixed tile using reference distance `width` |
+| `2` | mixed tile using reference distance `width + 1` |
+| `3` | copy from previous pixel for the whole tile |
+
+Mixed tiles read a 16-bit mask from the raw/mask stream. A set mask bit copies from the reference pixel. A clear mask bit decodes a new pixel.
+
+For standard `IM_0x5D` files, a clear mask bit reads a 3-bit command from the command stream. Command `7` reads a raw 16-bit pixel from the raw/mask stream. Other commands read `command + 1` extra bits from the control stream and apply a delta from:
+
+```text
+codec_tables.json -> tables.delta16_decode_b.values_signed
+```
+
+For files with flag `data[0x06] & 0x20`, a clear mask bit first reads a 1-bit raw flag from the control stream. If set, the pixel is read raw from the raw/mask stream; otherwise it uses the same delta table. In this path command `7` is also a delta command, using an 8-bit extra value.
+
 ## Output Pixels
 
 Decoded pixels are 16-bit values. The CLI writes them as 24-bit BMP using RGB565 expansion by default. Use `--bgr565` if you are testing files that appear color-swapped.
@@ -99,5 +142,5 @@ Observed in B5722 firmware:
 | `IFEG_65000001` | supported |
 | `IFEG_95000100` | supported |
 | `IFEG_15000100` / `IFEG_150001xx` | supported |
-| `IM` | not yet supported |
+| `IM_0x5D` | supported for observed non-alpha B5722 files |
 | `QM` | not yet supported |

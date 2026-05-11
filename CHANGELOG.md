@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.0
+
+- Add support for observed non-alpha `IM_0x5D` images from Samsung B5722 firmware.
+- Decode both standard and `0x20` near-lossless/raw-flag `IM_0x5D` stream variants.
+- Update README and format notes with the recovered `IM` header and stream layout.
+
 ## 0.4.0
 
 - Add support for the `IFEG_150001xx` three-stream 16-bit family.

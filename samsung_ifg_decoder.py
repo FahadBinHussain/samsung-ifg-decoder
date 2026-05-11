@@ -11,12 +11,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-VERSION = "0.4.0"
+VERSION = "0.5.0"
 IFEG_TYPE_65000001 = 0x65000001
 IFEG_TYPE_95000100 = 0x95000100
 IFEG_TYPE_150001_BASE = 0x15000100
 IFEG_TYPE_150001_MASK = 0xFFFFFF00
 SUPPORTED_IFEG_TYPE_LABELS = ("0x65000001", "0x95000100", "0x150001xx")
+SUPPORTED_INPUT_LABELS = ("IFEG 0x65000001", "IFEG 0x95000100", "IFEG 0x150001xx", "IM 0x5D")
 DEFAULT_TABLES_JSON = Path(__file__).resolve().parent / "codec_tables.json"
 SUPPORTED_OUTPUT_FORMATS = ("bmp", "png")
 
@@ -27,6 +28,18 @@ class IfegHeader:
     height: int
     ifeg_type: int
     raw_word_offset: int
+
+
+@dataclass(frozen=True)
+class ImHeader:
+    width: int
+    height: int
+    flags: int
+    version: int
+    stream_header_offset: int
+    command_offset: int
+    raw_offset: int
+    near_lossless: bool
 
 
 @dataclass(frozen=True)
@@ -78,6 +91,48 @@ def parse_ifeg_header(data: bytes) -> IfegHeader:
         height=read_u16le(data, 6),
         ifeg_type=read_u32le(data, 8),
         raw_word_offset=read_u32le(data, 12),
+    )
+
+
+def parse_im_header(data: bytes) -> ImHeader:
+    if len(data) < 17:
+        raise ValueError("file is too small for an IM header")
+    if data[:2] != b"IM":
+        raise ValueError("not an IM file")
+
+    width = read_u16le(data, 2)
+    height = read_u16le(data, 4)
+    flags = data[6]
+    version = data[7]
+    if version != 0x5D:
+        raise ValueError(f"unsupported IM version 0x{version:02x}; this release supports IM 0x5D")
+    if flags & 0x80:
+        raise ValueError("IM alpha-plane files are not supported yet")
+    if width <= 0 or height <= 0:
+        raise ValueError(f"invalid dimensions {width}x{height}")
+
+    stream_header_offset = 13 if data[8] & 0x40 else 9
+    if len(data) < stream_header_offset + 8:
+        raise ValueError("file is too small for an IM stream header")
+
+    command_offset = read_u32le(data, stream_header_offset)
+    raw_offset = read_u32le(data, stream_header_offset + 4)
+    stream_start = stream_header_offset + 8
+    if not (stream_start <= command_offset <= raw_offset <= len(data)):
+        raise ValueError(
+            "invalid IM stream split points: "
+            f"{stream_start}, {command_offset}, {raw_offset}, {len(data)}"
+        )
+
+    return ImHeader(
+        width=width,
+        height=height,
+        flags=flags,
+        version=version,
+        stream_header_offset=stream_header_offset,
+        command_offset=command_offset,
+        raw_offset=raw_offset,
+        near_lossless=bool(flags & 0x20),
     )
 
 
@@ -299,6 +354,87 @@ def decode_ifeg_three_stream_16bit(data: bytes, tables: CodecTables) -> tuple[in
     return header.width, header.height, pixels
 
 
+def decode_im_v5d_16bit(data: bytes, tables: CodecTables) -> tuple[int, int, list[int]]:
+    header = parse_im_header(data)
+    control_bits = BitReader(data, bit_position=header.stream_header_offset * 8 + 65)
+    command_bits = BitReader(data, bit_position=header.command_offset * 8 + 1)
+    raw_cursor = header.raw_offset
+    pixels = [0] * (header.width * header.height)
+    delta_table = tables.delta16_decode_b
+
+    blocks_w = (header.width + 3) // 4
+    blocks_h = (header.height + 3) // 4
+    width_rem = header.width % 4
+    height_rem = header.height % 4
+
+    def get_pixel(index: int) -> int:
+        if 0 <= index < len(pixels):
+            return pixels[index]
+        return 0
+
+    def set_pixel(index: int, value: int) -> None:
+        if 0 <= index < len(pixels):
+            pixels[index] = value & 0xFFFF
+
+    def read_raw_word() -> int:
+        nonlocal raw_cursor
+        if raw_cursor + 2 > len(data):
+            raise EOFError(f"raw word read past end at byte {raw_cursor}")
+        value = read_u16le(data, raw_cursor)
+        raw_cursor += 2
+        return value
+
+    def decode_delta(reference_value: int) -> int:
+        code = command_bits.read(3)
+        if not header.near_lossless and code == 7:
+            return read_raw_word()
+
+        extra = control_bits.read(code + 1)
+        table_index = (2 << code) + extra
+        if table_index >= len(delta_table):
+            raise ValueError(f"delta table index out of range: {table_index}")
+        return reference_value + delta_table[table_index]
+
+    def decode_mixed_tile(tile_w: int, tile_h: int, base_index: int, reference_distance: int) -> None:
+        mask = read_raw_word()
+        mask_bit = 0
+        for yy in range(tile_h):
+            for xx in range(tile_w):
+                dst_index = base_index + xx + yy * header.width
+                src_index = dst_index - reference_distance
+
+                if mask & (1 << mask_bit):
+                    set_pixel(dst_index, get_pixel(src_index))
+                elif header.near_lossless and control_bits.read(1):
+                    set_pixel(dst_index, read_raw_word())
+                else:
+                    set_pixel(dst_index, decode_delta(get_pixel(src_index)))
+                mask_bit += 1
+
+    def decode_copy_tile(tile_w: int, tile_h: int, base_index: int) -> None:
+        for yy in range(tile_h):
+            for xx in range(tile_w):
+                dst_index = base_index + xx + yy * header.width
+                set_pixel(dst_index, get_pixel(dst_index - 1))
+
+    for block_y in range(blocks_h):
+        tile_h = height_rem if block_y == blocks_h - 1 and height_rem else 4
+        for block_x in range(blocks_w):
+            tile_w = width_rem if block_x == blocks_w - 1 and width_rem else 4
+            base_index = block_y * header.width * 4 + block_x * 4
+            mode = control_bits.read(2)
+            if mode == 0:
+                decode_mixed_tile(tile_w, tile_h, base_index, 1)
+            elif mode == 1:
+                decode_mixed_tile(tile_w, tile_h, base_index, header.width)
+            elif mode == 2:
+                decode_mixed_tile(tile_w, tile_h, base_index, header.width + 1)
+            else:
+                decode_copy_tile(tile_w, tile_h, base_index)
+
+    return header.width, header.height, pixels
+
+
 def decode_ifeg(data: bytes, tables: CodecTables) -> tuple[int, int, list[int]]:
     header = parse_ifeg_header(data)
     if header.ifeg_type == IFEG_TYPE_65000001:
@@ -307,6 +443,19 @@ def decode_ifeg(data: bytes, tables: CodecTables) -> tuple[int, int, list[int]]:
         return decode_ifeg_three_stream_16bit(data, tables)
     supported = ", ".join(SUPPORTED_IFEG_TYPE_LABELS)
     raise ValueError(f"unsupported IFEG type 0x{header.ifeg_type:08x}; this release supports {supported}")
+
+
+def decode_samsung_image(data: bytes, tables: CodecTables) -> tuple[int, int, list[int], str]:
+    if data[:4] == b"IFEG":
+        header = parse_ifeg_header(data)
+        width, height, pixels = decode_ifeg(data, tables)
+        return width, height, pixels, f"IFEG_0x{header.ifeg_type:08X}"
+    if data[:2] == b"IM":
+        header = parse_im_header(data)
+        width, height, pixels = decode_im_v5d_16bit(data, tables)
+        return width, height, pixels, f"IM_0x{header.version:02X}"
+    supported = ", ".join(SUPPORTED_INPUT_LABELS)
+    raise ValueError(f"unsupported image family; this release supports {supported}")
 
 
 def rgb565_to_rgb888(value: int, bgr565: bool = False) -> tuple[int, int, int]:
@@ -418,8 +567,7 @@ def decode_one_file(
     split_panels: bool,
 ) -> dict[str, str]:
     data = input_path.read_bytes()
-    header = parse_ifeg_header(data)
-    width, height, pixels = decode_ifeg(data, tables)
+    width, height, pixels, type_label = decode_samsung_image(data, tables)
     write_image_rgb888(output_path, width, height, pixels, bgr565=bgr565)
 
     extra_outputs: list[str] = []
@@ -432,7 +580,7 @@ def decode_one_file(
         "extra_outputs": ";".join(extra_outputs),
         "width": str(width),
         "height": str(height),
-        "type": f"0x{header.ifeg_type:08X}",
+        "type": type_label,
         "status": "decoded",
         "error": "",
     }
@@ -449,8 +597,8 @@ def write_manifest(path: Path, rows: list[dict[str, str]]) -> None:
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Decode Samsung IFG/IFEG images from legacy phone firmware. "
-        "This release supports IFEG types 0x65000001, 0x95000100, and 0x150001xx."
+        description="Decode Samsung IFG/IFEG/IM images from legacy phone firmware. "
+        "This release supports IFEG types 0x65000001, 0x95000100, 0x150001xx, and IM 0x5D."
     )
     parser.add_argument("input", type=Path, help="input .ifg file or folder")
     parser.add_argument("output", type=Path, help="output .bmp/.png file, or output folder for batch mode")
