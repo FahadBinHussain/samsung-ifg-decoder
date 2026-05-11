@@ -1,0 +1,28 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
+
+# User-provided firmware/assets should not be committed.
+*.ifg
+*.tfs
+*.csc
+*.cla
+*.bin
+*.zip
+*.rar
+*.7z
+
+# Decoded outputs.
+*.bmp
+*.png
+*.jpg
+*.jpeg
+decode_manifest.csv
+output/
+outputs/
+_smoke_output/
+_smoke_manifest.csv
