@@ -11,9 +11,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-VERSION = "0.3.0"
+VERSION = "0.4.0"
 IFEG_TYPE_65000001 = 0x65000001
 IFEG_TYPE_95000100 = 0x95000100
+IFEG_TYPE_150001_BASE = 0x15000100
+IFEG_TYPE_150001_MASK = 0xFFFFFF00
+SUPPORTED_IFEG_TYPE_LABELS = ("0x65000001", "0x95000100", "0x150001xx")
 DEFAULT_TABLES_JSON = Path(__file__).resolve().parent / "codec_tables.json"
 SUPPORTED_OUTPUT_FORMATS = ("bmp", "png")
 
@@ -76,6 +79,14 @@ def parse_ifeg_header(data: bytes) -> IfegHeader:
         ifeg_type=read_u32le(data, 8),
         raw_word_offset=read_u32le(data, 12),
     )
+
+
+def is_ifeg_150001xx(ifeg_type: int) -> bool:
+    return (ifeg_type & IFEG_TYPE_150001_MASK) == IFEG_TYPE_150001_BASE
+
+
+def is_three_stream_ifeg_type(ifeg_type: int) -> bool:
+    return ifeg_type == IFEG_TYPE_95000100 or is_ifeg_150001xx(ifeg_type)
 
 
 def load_table(payload: dict[str, object], path: Path, table_name: str) -> list[int]:
@@ -180,25 +191,25 @@ def decode_ifeg_65000001(data: bytes, delta_table: list[int]) -> tuple[int, int,
     return header.width, header.height, pixels
 
 
-def decode_ifeg_95000100(data: bytes, tables: CodecTables) -> tuple[int, int, list[int]]:
+def decode_ifeg_three_stream_16bit(data: bytes, tables: CodecTables) -> tuple[int, int, list[int]]:
     header = parse_ifeg_header(data)
-    if header.ifeg_type != IFEG_TYPE_95000100:
+    if not is_three_stream_ifeg_type(header.ifeg_type):
         raise ValueError(
             f"unsupported IFEG type 0x{header.ifeg_type:08x}; "
-            f"expected 0x{IFEG_TYPE_95000100:08x}"
+            f"expected 0x{IFEG_TYPE_95000100:08x} or 0x150001xx"
         )
     if header.width <= 0 or header.height <= 0:
         raise ValueError(f"invalid dimensions {header.width}x{header.height}")
     if len(data) < 29:
-        raise ValueError("file is too small for an IFEG_95000100 stream header")
+        raise ValueError("file is too small for a three-stream IFEG header")
     if data[12:16] != b"\x01\x00\x01\x00" or data[16] not in (0, 1):
-        raise ValueError("unsupported IFEG_95000100 stream header")
+        raise ValueError("unsupported three-stream IFEG header")
 
     split_b = read_u32le(data, 21)
     split_c = read_u32le(data, 25)
     stream_start = 29
     if not (stream_start <= split_b <= split_c <= len(data)):
-        raise ValueError(f"invalid IFEG_95000100 stream split points: {split_b}, {split_c}")
+        raise ValueError(f"invalid three-stream IFEG split points: {split_b}, {split_c}")
 
     control_bits = BitReader(data[stream_start : split_b + 4], bit_position=1)
     command_bits = BitReader(data[split_b : split_c + 4], bit_position=1)
@@ -276,7 +287,7 @@ def decode_ifeg_95000100(data: bytes, tables: CodecTables) -> tuple[int, int, li
         elif mode == 4:
             decode_raw_tile(tile_w, tile_h, base_index)
         else:
-            raise ValueError(f"unsupported IFEG_95000100 tile mode: {mode}")
+            raise ValueError(f"unsupported three-stream IFEG tile mode: {mode}")
 
     for block_y in range(blocks_h):
         tile_h = height_rem if block_y == blocks_h - 1 and height_rem else 4
@@ -292,9 +303,9 @@ def decode_ifeg(data: bytes, tables: CodecTables) -> tuple[int, int, list[int]]:
     header = parse_ifeg_header(data)
     if header.ifeg_type == IFEG_TYPE_65000001:
         return decode_ifeg_65000001(data, tables.delta16_simple)
-    if header.ifeg_type == IFEG_TYPE_95000100:
-        return decode_ifeg_95000100(data, tables)
-    supported = ", ".join(f"0x{item:08x}" for item in (IFEG_TYPE_65000001, IFEG_TYPE_95000100))
+    if is_three_stream_ifeg_type(header.ifeg_type):
+        return decode_ifeg_three_stream_16bit(data, tables)
+    supported = ", ".join(SUPPORTED_IFEG_TYPE_LABELS)
     raise ValueError(f"unsupported IFEG type 0x{header.ifeg_type:08x}; this release supports {supported}")
 
 
@@ -439,7 +450,7 @@ def write_manifest(path: Path, rows: list[dict[str, str]]) -> None:
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Decode Samsung IFG/IFEG images from legacy phone firmware. "
-        "This release supports IFEG type 0x65000001."
+        "This release supports IFEG types 0x65000001, 0x95000100, and 0x150001xx."
     )
     parser.add_argument("input", type=Path, help="input .ifg file or folder")
     parser.add_argument("output", type=Path, help="output .bmp/.png file, or output folder for batch mode")

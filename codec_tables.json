@@ -4,7 +4,8 @@
   "notes": [
     "Functional lookup tables used by samsung_ifg_decoder.py.",
     "IFEG type 0x65000001 uses delta16_simple.",
-    "IFEG type 0x95000100 uses delta16_decode_a and delta16_decode_b."
+    "IFEG type 0x95000100 uses delta16_decode_a and delta16_decode_b.",
+    "IFEG type family 0x150001xx uses delta16_decode_a and delta16_decode_b."
   ],
   "tables": {
     "delta16_simple": {

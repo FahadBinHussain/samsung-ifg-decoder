@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.0
+
+- Add support for the `IFEG_150001xx` three-stream 16-bit family.
+- Validate the new path against the local Samsung B5722 `IFEG_150001xx` corpus.
+- Update README, format notes, and codec table notes.
+
 ## 0.3.0
 
 - Add support for `IFEG_95000100` three-stream 16-bit images.

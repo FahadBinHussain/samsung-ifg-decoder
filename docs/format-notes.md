@@ -1,6 +1,6 @@
 # Format Notes
 
-These notes document the currently implemented Samsung `IFEG_65000001` and `IFEG_95000100` paths. They are incomplete and will change as more IFG variants are decoded.
+These notes document the currently implemented Samsung `IFEG_65000001`, `IFEG_95000100`, and `IFEG_150001xx` paths. They are incomplete and will change as more IFG variants are decoded.
 
 ## IFEG Header
 
@@ -14,7 +14,7 @@ These notes document the currently implemented Samsung `IFEG_65000001` and `IFEG
 | `0x08` | 4 | type, little-endian `u32` |
 | `0x0c` | varies | subtype-specific payload metadata |
 
-This decoder currently supports types `0x65000001` and `0x95000100`.
+This decoder currently supports types `0x65000001`, `0x95000100`, and the `0x150001xx` family.
 
 ## Tile Layout
 
@@ -49,9 +49,9 @@ The active table for this release is:
 codec_tables.json -> tables.delta16_simple.values_signed
 ```
 
-## IFEG_95000100 Streams
+## IFEG_95000100 / IFEG_150001xx Streams
 
-`IFEG_95000100` uses the same `4x4` tile grid but a three-stream body. The observed B5722 layout starts with this internal payload header:
+`IFEG_95000100` and `IFEG_150001xx` use the same `4x4` tile grid but a three-stream body. The observed B5722 layout starts with this internal payload header:
 
 | Offset | Size | Meaning |
 | ---: | ---: | --- |
@@ -98,6 +98,6 @@ Observed in B5722 firmware:
 | --- | --- |
 | `IFEG_65000001` | supported |
 | `IFEG_95000100` | supported |
-| `IFEG_15000100` / `IFEG_150001xx` | not yet supported |
+| `IFEG_15000100` / `IFEG_150001xx` | supported |
 | `IM` | not yet supported |
 | `QM` | not yet supported |
