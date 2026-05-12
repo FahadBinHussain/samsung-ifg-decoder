@@ -98,6 +98,35 @@ class InspectTests(unittest.TestCase):
         self.assertIn("w2_intermediate_size=16", row["notes"])
 
 
+class AnalyzeTests(unittest.TestCase):
+    def test_analyze_walks_minimal_a9ll_stream(self) -> None:
+        tables = decoder.CodecTables([], [], [])
+        data = b"QM" + bytes([decoder.QM_VERSION_0B, 0x03, 0x00, 0x00])
+        data += struct.pack("<HHBBI", 4, 4, 0, 0, 0)
+        data += struct.pack("<II", 25, 25)
+        data += b"\xC0"
+
+        row = decoder.analyze_samsung_image(data, tables)
+        self.assertEqual(row["decode_status"], "decoded")
+        self.assertEqual(row["analysis_status"], "ok")
+        self.assertEqual(row["tile_count"], "1")
+        self.assertEqual(row["edge_copy_tiles"], "1")
+        self.assertEqual(row["control_bits_read"], "2")
+
+    def test_analyze_keeps_decode_failure_separate_from_stream_walk(self) -> None:
+        tables = decoder.CodecTables([], [], [])
+        data = b"QM" + bytes([decoder.QM_VERSION_0B, 0x00, 0x00, 0xC0])
+        data += struct.pack("<HHBB", 4, 4, 0, 0)
+        data += struct.pack("<II", 21, 21)
+        data += b"\xC0"
+
+        row = decoder.analyze_samsung_image(data, tables)
+        self.assertEqual(row["decode_status"], "failed")
+        self.assertIn("raw type", row["decode_error"])
+        self.assertEqual(row["analysis_status"], "ok")
+        self.assertEqual(row["tile_count"], "1")
+
+
 class ColorTests(unittest.TestCase):
     def test_rgb565_to_rgb888(self) -> None:
         self.assertEqual(decoder.rgb565_to_rgb888(0xF800), (255, 0, 0))

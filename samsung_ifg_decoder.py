@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-VERSION = "0.14.0"
+VERSION = "0.15.0"
 IFEG_TYPE_65000001 = 0x65000001
 IFEG_TYPE_95000100 = 0x95000100
 IFEG_TYPE_150001_BASE = 0x15000100
@@ -50,6 +50,25 @@ INSPECT_MANIFEST_FIELDS = [
     "supported",
     "notes",
     "error",
+]
+ANALYZE_MANIFEST_FIELDS = INSPECT_MANIFEST_FIELDS + [
+    "decode_status",
+    "decode_error",
+    "analysis_status",
+    "analysis_error",
+    "stream_summary",
+    "tile_count",
+    "mixed_tiles",
+    "copy_tiles",
+    "edge_copy_tiles",
+    "mask_words",
+    "copied_pixels",
+    "delta_pixels",
+    "literal_pixels",
+    "control_bits_read",
+    "command_bits_read",
+    "raw_bytes_read",
+    "raw_final_offset",
 ]
 QMAGE_DIFF = (
     0x0001, 0x0003, 0x0100, 0x0002, 0x0008, 0x0007, 0x0006, 0x0300,
@@ -1413,6 +1432,202 @@ def format_inspect_row(row: dict[str, str]) -> str:
     return " | ".join(parts)
 
 
+def analyze_qm_a9ll_stream(data: bytes, header: QmHeader) -> dict[str, str]:
+    stats: dict[str, str] = {}
+    command_offset, raw_offset, stream_start = qm_stream_offsets(data, header)
+    if not command_offset or not raw_offset or not stream_start:
+        raise ValueError("A9LL stream offsets are unavailable")
+
+    command_start = int(command_offset)
+    raw_start = int(raw_offset)
+    control_start = int(stream_start)
+    if not (control_start <= command_start <= raw_start <= len(data)):
+        raise ValueError(
+            "invalid A9LL stream split points: "
+            f"{control_start}, {command_start}, {raw_start}, size={len(data)}"
+        )
+
+    control_bits = BitReader(data[control_start:], bit_position=1)
+    command_bits = BitReader(data[command_start:], bit_position=1)
+    raw_words = ByteReader(data, raw_start)
+
+    mixed_tiles = 0
+    copy_tiles = 0
+    edge_copy_tiles = 0
+    mask_words = 0
+    copied_pixels = 0
+    delta_pixels = 0
+    literal_pixels = 0
+    last_tile = ""
+    last_mode = ""
+
+    try:
+        for y in range(0, header.height, 4):
+            for x in range(0, header.width, 4):
+                last_tile = f"{x},{y}"
+                tile_w = min(4, header.width - x)
+                tile_h = min(4, header.height - y)
+                mode = control_bits.read(2)
+                last_mode = str(mode)
+                if mode < 3:
+                    mixed_tiles += 1
+                    mask = raw_words.read_u16le()
+                    mask_words += 1
+                    mask_bit = 0
+                    for yy in range(4):
+                        for xx in range(4):
+                            if x + xx >= header.width or y + yy >= header.height:
+                                continue
+                            if mask & (1 << mask_bit):
+                                copied_pixels += 1
+                            else:
+                                command = command_bits.read(3)
+                                if command == 7:
+                                    raw_words.read_u16le()
+                                    literal_pixels += 1
+                                else:
+                                    control_bits.read(command + 1)
+                                    delta_pixels += 1
+                            mask_bit += 1
+                elif x > 0:
+                    copy_tiles += 1
+                    copied_pixels += tile_w * tile_h
+                else:
+                    edge_copy_tiles += 1
+    except Exception as exc:
+        stats["analysis_status"] = "failed"
+        stats["analysis_error"] = f"{type(exc).__name__}: {exc}; tile={last_tile}; mode={last_mode}"
+    else:
+        stats["analysis_status"] = "ok"
+
+    tile_columns = (header.width + 3) // 4
+    tile_rows = (header.height + 3) // 4
+    stats.update(
+        {
+            "stream_summary": (
+                f"control_bytes={command_start - control_start};"
+                f"command_bytes={raw_start - command_start};"
+                f"raw_bytes={len(data) - raw_start}"
+            ),
+            "tile_count": str(tile_columns * tile_rows),
+            "mixed_tiles": str(mixed_tiles),
+            "copy_tiles": str(copy_tiles),
+            "edge_copy_tiles": str(edge_copy_tiles),
+            "mask_words": str(mask_words),
+            "copied_pixels": str(copied_pixels),
+            "delta_pixels": str(delta_pixels),
+            "literal_pixels": str(literal_pixels),
+            "control_bits_read": str(control_bits.bit_position - 1),
+            "command_bits_read": str(command_bits.bit_position - 1),
+            "raw_bytes_read": str(max(0, raw_words.offset - raw_start)),
+            "raw_final_offset": str(raw_words.offset),
+        }
+    )
+    return stats
+
+
+def analyze_qm_w2_stream(data: bytes, header: QmHeader) -> dict[str, str]:
+    stats: dict[str, str] = {}
+    body_start = header.header_size
+    body_size = len(data) - body_start
+    if body_size < 12:
+        raise ValueError(f"QM W2 body is too small: {body_size}")
+
+    if header.depth == 2:
+        intermediate_size = read_u32le(data, body_start)
+        control_size = read_u32le(data, body_start + 4)
+        index_size = read_u32le(data, body_start + 8)
+        raw_size = body_size - 12 - control_size - index_size
+        stats["stream_summary"] = (
+            f"body_bytes={body_size};intermediate_size={intermediate_size};"
+            f"control_bytes={control_size};index_bytes={index_size};raw_bytes={raw_size}"
+        )
+    else:
+        table_count = read_u32le(data, body_start)
+        index_size = read_u32le(data, body_start + 4)
+        run_size = read_u32le(data, body_start + 8)
+        raw_size = body_size - 16 - table_count * 4 - index_size - run_size
+        stats["stream_summary"] = (
+            f"body_bytes={body_size};table_count={table_count};"
+            f"index_bytes={index_size};run_bytes={run_size};raw_bytes={raw_size}"
+        )
+
+    stats["analysis_status"] = "ok"
+    return stats
+
+
+def analyze_samsung_image(data: bytes, tables: CodecTables) -> dict[str, str]:
+    row = {field: "" for field in ANALYZE_MANIFEST_FIELDS}
+    row.update(inspect_samsung_image(data))
+
+    try:
+        decode_samsung_image(data, tables)
+    except Exception as exc:
+        row["decode_status"] = "failed"
+        row["decode_error"] = str(exc)
+    else:
+        row["decode_status"] = "decoded"
+
+    if row["family"] != "QM":
+        row["analysis_status"] = "ok" if not row["error"] else "failed"
+        row["analysis_error"] = row["error"]
+        return row
+
+    try:
+        header = parse_qm_header(data, strict=False)
+        if header.encoder_mode == QM_ENCODER_A9LL:
+            row.update(analyze_qm_a9ll_stream(data, header))
+        elif header.encoder_mode == QM_ENCODER_W2_PASS:
+            row.update(analyze_qm_w2_stream(data, header))
+        else:
+            row["analysis_status"] = "skipped"
+            row["analysis_error"] = f"unsupported QM encoder mode {header.encoder_mode}"
+    except Exception as exc:
+        row["analysis_status"] = "failed"
+        row["analysis_error"] = str(exc)
+
+    return row
+
+
+def analyze_one_file(input_path: Path, tables: CodecTables) -> dict[str, str]:
+    row = analyze_samsung_image(input_path.read_bytes(), tables)
+    row["source"] = str(input_path)
+    return row
+
+
+def format_analyze_row(row: dict[str, str]) -> str:
+    dimensions = f"{row['width']}x{row['height']}" if row["width"] and row["height"] else "unknown-size"
+    parts = [
+        row["source"],
+        row["type"] or row["family"] or "unknown",
+        dimensions,
+        f"decode={row['decode_status'] or 'unknown'}",
+        f"analysis={row['analysis_status'] or 'unknown'}",
+    ]
+    if row["tile_count"]:
+        parts.append(
+            f"tiles={row['tile_count']} mixed={row['mixed_tiles']} copy={row['copy_tiles']} edge={row['edge_copy_tiles']}"
+        )
+    if row["literal_pixels"] or row["delta_pixels"] or row["copied_pixels"]:
+        parts.append(
+            f"pixels literal={row['literal_pixels']} delta={row['delta_pixels']} copied={row['copied_pixels']}"
+        )
+    if row["control_bits_read"] or row["command_bits_read"] or row["raw_bytes_read"]:
+        parts.append(
+            f"read control_bits={row['control_bits_read'] or '0'} "
+            f"command_bits={row['command_bits_read'] or '0'} raw_bytes={row['raw_bytes_read'] or '0'}"
+        )
+    if row["stream_summary"]:
+        parts.append(row["stream_summary"])
+    if row["decode_error"]:
+        parts.append(f"decode_error={row['decode_error']}")
+    if row["analysis_error"]:
+        parts.append(f"analysis_error={row['analysis_error']}")
+    if row["notes"]:
+        parts.append(f"notes={row['notes']}")
+    return " | ".join(parts)
+
+
 def decode_one_file(
     input_path: Path,
     output_path: Path,
@@ -1473,6 +1688,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("input", type=Path, help="input .ifg/.qmg file or folder")
     parser.add_argument("output", type=Path, nargs="?", help="output .bmp/.png file, or output folder for batch mode")
     parser.add_argument("--inspect", action="store_true", help="print image headers and stream metadata without decoding")
+    parser.add_argument("--analyze", action="store_true", help="inspect headers and walk supported streams to report decode diagnostics")
     parser.add_argument("--recursive", action="store_true", help="recurse into input folders")
     parser.add_argument("--tables", type=Path, default=DEFAULT_TABLES_JSON, help="codec table JSON path")
     parser.add_argument("--format", choices=SUPPORTED_OUTPUT_FORMATS, default="bmp", help="batch output format")
@@ -1491,6 +1707,9 @@ def main(argv: list[str] | None = None) -> int:
     input_path = args.input
     input_files = iter_input_files(input_path, recursive=args.recursive)
 
+    if args.inspect and args.analyze:
+        parser.error("--inspect and --analyze cannot be used together")
+
     if args.inspect:
         rows = []
         for source in input_files:
@@ -1501,8 +1720,19 @@ def main(argv: list[str] | None = None) -> int:
             write_manifest(args.manifest, rows, INSPECT_MANIFEST_FIELDS)
         return 1 if any(row["error"] for row in rows) else 0
 
+    if args.analyze:
+        tables = load_codec_tables(args.tables)
+        rows = []
+        for source in input_files:
+            row = analyze_one_file(source, tables)
+            rows.append(row)
+            print(format_analyze_row(row))
+        if args.manifest:
+            write_manifest(args.manifest, rows, ANALYZE_MANIFEST_FIELDS)
+        return 1 if any(row["error"] for row in rows) else 0
+
     if args.output is None:
-        parser.error("output is required unless --inspect is used")
+        parser.error("output is required unless --inspect or --analyze is used")
 
     tables = load_codec_tables(args.tables)
     output_path = args.output

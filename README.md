@@ -99,6 +99,12 @@ Inspect headers without decoding:
 python samsung_ifg_decoder.py input_folder --inspect --recursive --manifest inspect_manifest.csv
 ```
 
+Analyze decode diagnostics without writing images:
+
+```bash
+python samsung_ifg_decoder.py input_folder --analyze --recursive --manifest analyze_manifest.csv
+```
+
 ## What Files Do
 
 - `samsung_ifg_decoder.py` is the decoder and command-line tool.

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.15.0
+
+- Add `--analyze` mode for decode diagnostics without writing image output.
+- Report decode status, stream walk status, tile counts, A9LL bit/raw consumption, and W2 stream size summaries.
+- Keep decode failures separate from stream-analysis failures for easier reverse engineering of unsupported QMG variants.
+
 ## 0.14.0
 
 - Add GitHub Actions CI for Python 3.10, 3.11, and 3.12.
