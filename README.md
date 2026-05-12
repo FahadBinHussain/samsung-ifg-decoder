@@ -1,8 +1,8 @@
 # samsung-ifg-decoder
 
-Open-source Samsung IFG / IFEG / IM / QM image decoder for legacy phone firmware assets.
+Open-source Samsung IFG / QMG / IFEG / IM / QM image decoder for legacy phone firmware assets.
 
-This project decodes a subset of Samsung `.ifg` images used in older feature-phone firmware. Current releases support `IFEG` images with types `0x65000001`, `0x95000100`, and `0x150001xx`, `IM` version `0x5D`, and observed `QM` version `0x0B` images, including many image assets found in Samsung B5722 firmware.
+This project decodes a subset of Samsung `.ifg` and `.qmg` images used in older feature-phone firmware. Current releases support `IFEG` images with types `0x65000001`, `0x95000100`, and `0x150001xx`, `IM` version `0x5D`, and observed `QM` version `0x0B` images, including many image assets found in Samsung B5722 firmware.
 
 ## Status
 
@@ -17,7 +17,7 @@ Supported:
 - Output: 24-bit `.bmp` or `.png`
 - Optional RGBA `.png` output for observed `QM_0x0B_A9LL` and `QM_0x0B_W2` alpha planes
 - Single-file decode
-- Folder/batch decode
+- Folder/batch decode for `.ifg` and `.qmg`
 - Optional split of `240x960` idle wallpapers into `240x320` panels
 
 Not supported yet:
@@ -45,7 +45,7 @@ Decode one file as PNG:
 python samsung_ifg_decoder.py input.ifg output.png
 ```
 
-Decode a folder:
+Decode a folder of `.ifg` and `.qmg` files:
 
 ```bash
 python samsung_ifg_decoder.py input_folder output_folder
@@ -100,7 +100,7 @@ These are `IFEG_65000001`, usually `240x960`. Use `--split-240x320-panels` to ex
 
 ## Example B5722 UI Assets
 
-B5722 firmware also contains many `IFEG_95000100`, `IFEG_150001xx`, `IM_0x5D`, and `QM_0x0B` images, especially widget, menu, dialpad, and UI assets. They can be decoded with the same commands:
+B5722 firmware also contains many `IFEG_95000100`, `IFEG_150001xx`, `IM_0x5D`, and `QM_0x0B` images, especially widget, menu, dialpad, and UI assets. These can appear as `.ifg` or `.qmg` files and can be decoded with the same commands:
 
 ```bash
 python samsung_ifg_decoder.py input.ifg output.png
@@ -110,7 +110,7 @@ python samsung_ifg_decoder.py input.ifg output.png
 
 This repository does not include Samsung firmware, proprietary wallpapers, decoded assets, malware samples, original Samsung code, or third-party converter binaries.
 
-Users must provide their own `.ifg` files. This project is intended for preservation, interoperability, and personal recovery of legacy phone firmware assets.
+Users must provide their own `.ifg` / `.qmg` files. This project is intended for preservation, interoperability, and personal recovery of legacy phone firmware assets.
 
 ## Roadmap
 

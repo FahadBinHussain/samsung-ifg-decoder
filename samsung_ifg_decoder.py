@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-VERSION = "0.8.0"
+VERSION = "0.9.0"
 IFEG_TYPE_65000001 = 0x65000001
 IFEG_TYPE_95000100 = 0x95000100
 IFEG_TYPE_150001_BASE = 0x15000100
@@ -29,6 +29,7 @@ SUPPORTED_INPUT_LABELS = (
 )
 DEFAULT_TABLES_JSON = Path(__file__).resolve().parent / "codec_tables.json"
 SUPPORTED_OUTPUT_FORMATS = ("bmp", "png")
+SUPPORTED_INPUT_SUFFIXES = (".ifg", ".qmg")
 QMAGE_DIFF = (
     0x0001, 0x0003, 0x0100, 0x0002, 0x0008, 0x0007, 0x0006, 0x0300,
     0x0010, 0x0004, 0x0200, 0x0009, 0x0040, 0x0018, 0x0005, 0x0020,
@@ -1122,8 +1123,44 @@ def iter_input_files(input_path: Path, recursive: bool) -> list[Path]:
         return [input_path]
     if not input_path.is_dir():
         raise FileNotFoundError(input_path)
-    pattern = "**/*.ifg" if recursive else "*.ifg"
-    return sorted(input_path.glob(pattern))
+    candidates = input_path.rglob("*") if recursive else input_path.glob("*")
+    return sorted(
+        path
+        for path in candidates
+        if path.is_file() and path.suffix.lower() in SUPPORTED_INPUT_SUFFIXES
+    )
+
+
+def disambiguate_output_path(output_path: Path, input_path: Path, used_outputs: set[str]) -> Path:
+    output_key = str(output_path).lower()
+    if output_key not in used_outputs:
+        used_outputs.add(output_key)
+        return output_path
+
+    suffix_stem = input_path.suffix.lower().lstrip(".") or "image"
+    candidate = output_path.with_name(f"{output_path.stem}_{suffix_stem}{output_path.suffix}")
+    candidate_key = str(candidate).lower()
+    counter = 2
+    while candidate_key in used_outputs:
+        candidate = output_path.with_name(f"{output_path.stem}_{suffix_stem}_{counter}{output_path.suffix}")
+        candidate_key = str(candidate).lower()
+        counter += 1
+    used_outputs.add(candidate_key)
+    return candidate
+
+
+def plan_batch_outputs(
+    input_files: list[Path],
+    input_root: Path | None,
+    output_root: Path,
+    output_format: str,
+) -> dict[Path, Path]:
+    planned_outputs: dict[Path, Path] = {}
+    used_outputs: set[str] = set()
+    for path in input_files:
+        output_path = default_output_for_file(path, input_root, output_root, output_format)
+        planned_outputs[path] = disambiguate_output_path(output_path, path, used_outputs)
+    return planned_outputs
 
 
 def decode_one_file(
@@ -1178,11 +1215,11 @@ def write_manifest(path: Path, rows: list[dict[str, str]]) -> None:
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Decode Samsung IFG/IFEG/IM images from legacy phone firmware. "
+        description="Decode Samsung IFG/QMG/IFEG/IM images from legacy phone firmware. "
         "This release supports IFEG types 0x65000001, 0x95000100, 0x150001xx, "
         "IM 0x5D, and QM 0x0B."
     )
-    parser.add_argument("input", type=Path, help="input .ifg file or folder")
+    parser.add_argument("input", type=Path, help="input .ifg/.qmg file or folder")
     parser.add_argument("output", type=Path, help="output .bmp/.png file, or output folder for batch mode")
     parser.add_argument("--recursive", action="store_true", help="recurse into input folders")
     parser.add_argument("--tables", type=Path, default=DEFAULT_TABLES_JSON, help="codec table JSON path")
@@ -1212,10 +1249,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         input_root = input_path if input_path.is_dir() else None
         output_format = "png" if args.with_alpha else args.format
-        planned_outputs = {
-            path: default_output_for_file(path, input_root, output_path, output_format)
-            for path in input_files
-        }
+        planned_outputs = plan_batch_outputs(input_files, input_root, output_path, output_format)
 
     rows: list[dict[str, str]] = []
     for source, target in planned_outputs.items():

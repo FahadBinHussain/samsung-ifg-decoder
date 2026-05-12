@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.0
+
+- Include `.qmg` files in folder and recursive batch decoding.
+- Keep single-file `.qmg` decoding on the same QM path as `.ifg`.
+- Avoid batch output collisions when same-stem files with different input extensions are decoded together.
+
 ## 0.8.0
 
 - Decode observed `QM_0x0B_W2` alpha planes with `--with-alpha`.

@@ -1,6 +1,6 @@
 # Format Notes
 
-These notes document the currently implemented Samsung `IFEG_65000001`, `IFEG_95000100`, `IFEG_150001xx`, `IM_0x5D`, and `QM_0x0B` paths. They are incomplete and will change as more IFG variants are decoded.
+These notes document the currently implemented Samsung `IFEG_65000001`, `IFEG_95000100`, `IFEG_150001xx`, `IM_0x5D`, and `QM_0x0B` paths. They are incomplete and will change as more IFG/QMG variants are decoded.
 
 ## IFEG Header
 
@@ -40,7 +40,7 @@ For non-alpha `IM_0x5D` files, the stream header contains two little-endian spli
 
 ## QM 0x0B Header
 
-Observed B5722 `QM` files begin with:
+Observed B5722 `QM` files appear with both `.ifg` and `.qmg` extensions and begin with:
 
 | Offset | Size | Meaning |
 | ---: | ---: | --- |
@@ -228,4 +228,4 @@ Observed in B5722 firmware:
 | `IFEG_95000100` | supported |
 | `IFEG_15000100` / `IFEG_150001xx` | supported |
 | `IM_0x5D` | supported for observed non-alpha B5722 files |
-| `QM_0x0B` | supported for observed B5722 A9LL and W2 depth-2 files; A9LL and W2 alpha output is supported with `--with-alpha` |
+| `QM_0x0B` | supported for observed B5722 A9LL and W2 depth-2 `.ifg` / `.qmg` files; A9LL and W2 alpha output is supported with `--with-alpha` |
