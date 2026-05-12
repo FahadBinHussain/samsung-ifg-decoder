@@ -105,6 +105,8 @@ Analyze decode diagnostics without writing images:
 python samsung_ifg_decoder.py input_folder --analyze --recursive --manifest analyze_manifest.csv
 ```
 
+For A9LL QMG files, analysis also reports expected control, command, and raw stream limits, then warns when the current stream walk overruns a split point. This is useful for spotting unsupported `use_extra_exception` resources that can otherwise produce corrupt-looking output.
+
 ## What Files Do
 
 - `samsung_ifg_decoder.py` is the decoder and command-line tool.

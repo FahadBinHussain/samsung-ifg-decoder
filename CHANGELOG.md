@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.16.0
+
+- Report A9LL control, command, and raw stream split limits.
+- Mark A9LL analysis as `warning` when the current stream walk overruns any expected split point.
+- Add manifest fields for split-limit bits, raw limit offset, bytes available before the raw limit, and overrun counts.
+
 ## 0.15.0
 
 - Add `--analyze` mode for decode diagnostics without writing image output.

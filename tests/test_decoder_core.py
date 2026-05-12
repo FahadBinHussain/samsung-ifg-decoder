@@ -126,6 +126,43 @@ class AnalyzeTests(unittest.TestCase):
         self.assertEqual(row["analysis_status"], "ok")
         self.assertEqual(row["tile_count"], "1")
 
+    def test_analyze_warns_when_a9ll_raw_stream_overruns_alpha_split(self) -> None:
+        tables = decoder.CodecTables([], [], [])
+        data = b"QM" + bytes([decoder.QM_VERSION_0B, 0x03, 0x00, 0x00])
+        data += struct.pack("<HHBBI", 4, 4, 0, 0, 28)
+        data += struct.pack("<II", 25, 26)
+        data += b"\x00"
+        data += b"\xE0"
+        data += b"\xFE\xFF"
+        data += b"\x34\x12"
+
+        row = decoder.analyze_samsung_image(data, tables)
+        self.assertEqual(row["decode_status"], "decoded")
+        self.assertEqual(row["analysis_status"], "warning")
+        self.assertEqual(row["raw_limit_offset"], "28")
+        self.assertEqual(row["raw_limit_bytes"], "2")
+        self.assertEqual(row["raw_bytes_read"], "4")
+        self.assertEqual(row["raw_overrun_bytes"], "2")
+        self.assertIn("overran color limit", row["analysis_error"])
+
+    def test_analyze_warns_when_a9ll_command_stream_overruns_split(self) -> None:
+        tables = decoder.CodecTables([], [], [])
+        data = b"QM" + bytes([decoder.QM_VERSION_0B, 0x03, 0x00, 0x00])
+        data += struct.pack("<HHBBI", 4, 4, 0, 0, 0)
+        data += struct.pack("<II", 25, 25)
+        data += b"\x00"
+        data += b"\xFE\xFF"
+        data += b"\x34\x12"
+
+        row = decoder.analyze_samsung_image(data, tables)
+        self.assertEqual(row["decode_status"], "decoded")
+        self.assertEqual(row["analysis_status"], "warning")
+        self.assertEqual(row["command_limit_bits"], "0")
+        self.assertEqual(row["command_bits_read"], "3")
+        self.assertEqual(row["command_overrun_bits"], "3")
+        self.assertEqual(row["raw_overrun_bytes"], "0")
+        self.assertIn("command stream overran", row["analysis_error"])
+
 
 class ColorTests(unittest.TestCase):
     def test_rgb565_to_rgb888(self) -> None:

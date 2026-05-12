@@ -68,7 +68,7 @@ Observed animation headers add:
 | `0x16` | 1 | no-repeat flag |
 | `0x17` | 1 | padding/unknown |
 
-The decoder exports the RGB565 color plane by default. With `--with-alpha`, it also exports decoded alpha for observed A9LL and W2 alpha streams as RGBA PNG. For observed `QM_0x0B_A9LL` animations, this release decodes the first/key frame as a still image; full multi-frame animation export is not implemented yet. Use `--inspect` to print metadata for unsupported or partially understood QMG files without decoding them. Use `--analyze` to additionally attempt decoding and walk supported QMG streams, producing tile counts, bit/raw consumption, stream summaries, and failure locations for reverse-engineering work.
+The decoder exports the RGB565 color plane by default. With `--with-alpha`, it also exports decoded alpha for observed A9LL and W2 alpha streams as RGBA PNG. For observed `QM_0x0B_A9LL` animations, this release decodes the first/key frame as a still image; full multi-frame animation export is not implemented yet. Use `--inspect` to print metadata for unsupported or partially understood QMG files without decoding them. Use `--analyze` to additionally attempt decoding and walk supported QMG streams, producing tile counts, bit/raw consumption, stream summaries, split-point overruns, and failure locations for reverse-engineering work.
 
 ## QM 0x0B A9LL Stream
 
@@ -94,6 +94,8 @@ Mixed tiles read a 16-bit mask from the raw/mask stream. A set mask bit copies f
 ```text
 codec_tables.json -> tables.delta16_decode_b.values_signed[2:258]
 ```
+
+For A9LL files, the control stream is expected to stop at the command offset and the command stream is expected to stop at the raw/mask offset. For transparent A9LL files, the color raw/mask stream is expected to stop before the alpha body at `alpha_position`. `--analyze` reports `control_limit_bits`, `command_limit_bits`, `raw_limit_offset`, and matching overrun counts; any overrun marks analysis as `warning`. Observed files with the `use_extra_exception` flag can hit these warnings with the standard A9LL walk, which means the current decoded RGB plane may be corrupt even if the file did not raise a decode error.
 
 ## QM 0x0B A9LL Alpha Stream
 

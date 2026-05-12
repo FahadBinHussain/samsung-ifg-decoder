@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-VERSION = "0.15.0"
+VERSION = "0.16.0"
 IFEG_TYPE_65000001 = 0x65000001
 IFEG_TYPE_95000100 = 0x95000100
 IFEG_TYPE_150001_BASE = 0x15000100
@@ -66,9 +66,16 @@ ANALYZE_MANIFEST_FIELDS = INSPECT_MANIFEST_FIELDS + [
     "delta_pixels",
     "literal_pixels",
     "control_bits_read",
+    "control_limit_bits",
+    "control_overrun_bits",
     "command_bits_read",
+    "command_limit_bits",
+    "command_overrun_bits",
     "raw_bytes_read",
     "raw_final_offset",
+    "raw_limit_offset",
+    "raw_limit_bytes",
+    "raw_overrun_bytes",
 ]
 QMAGE_DIFF = (
     0x0001, 0x0003, 0x0100, 0x0002, 0x0008, 0x0007, 0x0006, 0x0300,
@@ -1432,6 +1439,12 @@ def format_inspect_row(row: dict[str, str]) -> str:
     return " | ".join(parts)
 
 
+def qm_a9ll_color_raw_limit(data: bytes, header: QmHeader, raw_start: int) -> int:
+    if header.raw_type in (0x03, 0x06) and raw_start < header.alpha_position <= len(data):
+        return header.alpha_position
+    return len(data)
+
+
 def analyze_qm_a9ll_stream(data: bytes, header: QmHeader) -> dict[str, str]:
     stats: dict[str, str] = {}
     command_offset, raw_offset, stream_start = qm_stream_offsets(data, header)
@@ -1450,6 +1463,7 @@ def analyze_qm_a9ll_stream(data: bytes, header: QmHeader) -> dict[str, str]:
     control_bits = BitReader(data[control_start:], bit_position=1)
     command_bits = BitReader(data[command_start:], bit_position=1)
     raw_words = ByteReader(data, raw_start)
+    raw_limit = qm_a9ll_color_raw_limit(data, header, raw_start)
 
     mixed_tiles = 0
     copy_tiles = 0
@@ -1500,6 +1514,27 @@ def analyze_qm_a9ll_stream(data: bytes, header: QmHeader) -> dict[str, str]:
     else:
         stats["analysis_status"] = "ok"
 
+    control_bits_read = max(0, control_bits.bit_position - 1)
+    command_bits_read = max(0, command_bits.bit_position - 1)
+    control_limit_bits = max(0, command_start - control_start) * 8
+    command_limit_bits = max(0, raw_start - command_start) * 8
+    control_overrun_bits = max(0, control_bits_read - control_limit_bits)
+    command_overrun_bits = max(0, command_bits_read - command_limit_bits)
+    raw_available_bytes = max(0, len(data) - raw_start)
+    raw_limit_bytes = max(0, raw_limit - raw_start)
+    raw_bytes_read = max(0, raw_words.offset - raw_start)
+    raw_overrun_bytes = max(0, raw_words.offset - raw_limit)
+    overruns = []
+    if control_overrun_bits:
+        overruns.append(f"control stream overran split by {control_overrun_bits} bits")
+    if command_overrun_bits:
+        overruns.append(f"command stream overran split by {command_overrun_bits} bits")
+    if raw_overrun_bytes:
+        overruns.append(f"raw stream overran color limit by {raw_overrun_bytes} bytes")
+    if overruns and stats.get("analysis_status") == "ok":
+        stats["analysis_status"] = "warning"
+        stats["analysis_error"] = "; ".join(overruns)
+
     tile_columns = (header.width + 3) // 4
     tile_rows = (header.height + 3) // 4
     stats.update(
@@ -1507,7 +1542,8 @@ def analyze_qm_a9ll_stream(data: bytes, header: QmHeader) -> dict[str, str]:
             "stream_summary": (
                 f"control_bytes={command_start - control_start};"
                 f"command_bytes={raw_start - command_start};"
-                f"raw_bytes={len(data) - raw_start}"
+                f"raw_bytes={raw_available_bytes};"
+                f"raw_limit_bytes={raw_limit_bytes}"
             ),
             "tile_count": str(tile_columns * tile_rows),
             "mixed_tiles": str(mixed_tiles),
@@ -1517,10 +1553,17 @@ def analyze_qm_a9ll_stream(data: bytes, header: QmHeader) -> dict[str, str]:
             "copied_pixels": str(copied_pixels),
             "delta_pixels": str(delta_pixels),
             "literal_pixels": str(literal_pixels),
-            "control_bits_read": str(control_bits.bit_position - 1),
-            "command_bits_read": str(command_bits.bit_position - 1),
-            "raw_bytes_read": str(max(0, raw_words.offset - raw_start)),
+            "control_bits_read": str(control_bits_read),
+            "control_limit_bits": str(control_limit_bits),
+            "control_overrun_bits": str(control_overrun_bits),
+            "command_bits_read": str(command_bits_read),
+            "command_limit_bits": str(command_limit_bits),
+            "command_overrun_bits": str(command_overrun_bits),
+            "raw_bytes_read": str(raw_bytes_read),
             "raw_final_offset": str(raw_words.offset),
+            "raw_limit_offset": str(raw_limit),
+            "raw_limit_bytes": str(raw_limit_bytes),
+            "raw_overrun_bytes": str(raw_overrun_bytes),
         }
     )
     return stats
@@ -1616,6 +1659,16 @@ def format_analyze_row(row: dict[str, str]) -> str:
         parts.append(
             f"read control_bits={row['control_bits_read'] or '0'} "
             f"command_bits={row['command_bits_read'] or '0'} raw_bytes={row['raw_bytes_read'] or '0'}"
+        )
+    if row["control_overrun_bits"] or row["command_overrun_bits"] or row["raw_overrun_bytes"]:
+        parts.append(
+            f"overrun control_bits={row['control_overrun_bits'] or '0'} "
+            f"command_bits={row['command_overrun_bits'] or '0'} raw_bytes={row['raw_overrun_bytes'] or '0'}"
+        )
+    if row["raw_limit_offset"]:
+        parts.append(
+            f"raw_limit={row['raw_limit_offset']} "
+            f"limit_bytes={row['raw_limit_bytes'] or '0'} overrun={row['raw_overrun_bytes'] or '0'}"
         )
     if row["stream_summary"]:
         parts.append(row["stream_summary"])
