@@ -1,5 +1,7 @@
 # samsung-ifg-decoder
 
+[![CI](https://github.com/FahadBinHussain/samsung-ifg-decoder/actions/workflows/ci.yml/badge.svg)](https://github.com/FahadBinHussain/samsung-ifg-decoder/actions/workflows/ci.yml)
+
 Open-source Samsung IFG / QMG / IFEG / IM / QM image decoder for legacy phone firmware assets.
 
 This project decodes a subset of Samsung `.ifg` and `.qmg` images used in older feature-phone firmware. Current releases support `IFEG` images with types `0x65000001`, `0x95000100`, and `0x150001xx`, `IM` version `0x5D`, and observed `QM` version `0x0B` images, including many image assets found in Samsung B5722 firmware.

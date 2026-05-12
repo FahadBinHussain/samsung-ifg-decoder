@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.14.0
+
+- Add GitHub Actions CI for Python 3.10, 3.11, and 3.12.
+- Run source compilation, unit tests, and CLI version smoke checks on push and pull request.
+- Add a README CI badge for public release confidence.
+
 ## 0.13.0
 
 - Add `--inspect` mode to print IFG/QMG/IM header and stream metadata without decoding.
