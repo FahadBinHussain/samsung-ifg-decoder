@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.12.0
+
+- Add a stdlib `unittest` regression suite with synthetic decoder fixtures.
+- Cover the W2 odd-pixel tail behavior for raw groups and table runs.
+- Cover alpha sample unpacking, RGB565 conversion, and MSB-first bit reading.
+
 ## 0.11.0
 
 - Fix W2 depth-1 decoding for odd pixel counts.

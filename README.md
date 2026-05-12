@@ -33,6 +33,14 @@ Not supported yet:
 - Python 3.10 or newer
 - No third-party Python packages
 
+## Test
+
+Run the synthetic regression suite:
+
+```bash
+python -m unittest discover -s tests
+```
+
 ## Usage
 
 Decode one file:
@@ -118,4 +126,4 @@ Users must provide their own `.ifg` / `.qmg` files. This project is intended for
 
 - Broaden `QM` / QMG version coverage and full animation frame export.
 - Investigate `IM` alpha-plane variants.
-- Add automated tests with redistributable synthetic fixtures.
+- Add more automated tests with redistributable synthetic fixtures.
