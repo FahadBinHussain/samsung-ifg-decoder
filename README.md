@@ -16,13 +16,14 @@ Supported:
 - `QM` magic: `51 4D`, version byte `0x0B`, observed A9LL and W2 depth-2 streams
 - Output: 24-bit `.bmp` or `.png`
 - Optional RGBA `.png` output for observed `QM_0x0B_A9LL` and `QM_0x0B_W2` alpha planes
+- First-frame decode for observed `QM_0x0B_A9LL` animation keyframes
 - Single-file decode
 - Folder/batch decode for `.ifg` and `.qmg`
 - Optional split of `240x960` idle wallpapers into `240x320` panels
 
 Not supported yet:
 
-- Other `QM` / QMG versions and animation frames
+- Other `QM` / QMG versions and full animation frame export
 - `IM` alpha-plane variants
 - Encoding BMP/JPG back to IFG
 
@@ -114,6 +115,6 @@ Users must provide their own `.ifg` / `.qmg` files. This project is intended for
 
 ## Roadmap
 
-- Broaden `QM` / QMG version coverage and animation handling.
+- Broaden `QM` / QMG version coverage and full animation frame export.
 - Investigate `IM` alpha-plane variants.
 - Add automated tests with redistributable synthetic fixtures.

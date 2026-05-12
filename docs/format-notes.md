@@ -56,7 +56,19 @@ Observed B5722 `QM` files appear with both `.ifg` and `.qmg` extensions and begi
 | `0x0c` | 4 | observed metadata/alpha-position field |
 | `0x10` | varies | codec body |
 
-The decoder exports the RGB565 color plane by default. With `--with-alpha`, it also exports decoded alpha for observed A9LL and W2 alpha streams as RGBA PNG.
+For non-animated files, the codec body starts at `0x10`. For observed animation keyframes, the header extends through `0x17` and the codec body starts at `0x18`.
+
+Observed animation headers add:
+
+| Offset | Size | Meaning |
+| ---: | ---: | --- |
+| `0x10` | 2 | total frame count |
+| `0x12` | 2 | current frame number |
+| `0x14` | 2 | frame delay |
+| `0x16` | 1 | no-repeat flag |
+| `0x17` | 1 | padding/unknown |
+
+The decoder exports the RGB565 color plane by default. With `--with-alpha`, it also exports decoded alpha for observed A9LL and W2 alpha streams as RGBA PNG. For observed `QM_0x0B_A9LL` animations, this release decodes the first/key frame as a still image; full multi-frame animation export is not implemented yet.
 
 ## QM 0x0B A9LL Stream
 
@@ -93,7 +105,7 @@ Observed A9LL alpha bodies start at the header's `0x0c` split point. The alpha b
 | `0x04` | 4 | raw/mask stream offset |
 | `0x08` | varies | control bitstream |
 
-The decoded alpha samples are packed two pixels per 16-bit value: low byte first, high byte second. The tile grid is therefore `4x4` over packed samples, equivalent to `8x4` output pixels. Mixed alpha tiles use the same 2-bit mode, 16-bit mask, 3-bit command, raw word, and delta-table pattern as the color A9LL stream.
+The decoded alpha samples are packed two pixels per 16-bit value: low byte first, high byte second. The tile grid is therefore `4x4` over packed samples, equivalent to `8x4` output pixels. Mixed alpha tiles use the same 2-bit mode, 16-bit mask, 3-bit command, raw word, and delta-table pattern as the color A9LL stream. This packed layout is used by observed A9LL alpha bodies with alpha-depth flags `1` and `2`.
 
 ## QM 0x0B W2 Stream
 
@@ -228,4 +240,4 @@ Observed in B5722 firmware:
 | `IFEG_95000100` | supported |
 | `IFEG_15000100` / `IFEG_150001xx` | supported |
 | `IM_0x5D` | supported for observed non-alpha B5722 files |
-| `QM_0x0B` | supported for observed B5722 A9LL and W2 depth-2 `.ifg` / `.qmg` files; A9LL and W2 alpha output is supported with `--with-alpha` |
+| `QM_0x0B` | supported for observed B5722 A9LL and W2 depth-2 `.ifg` / `.qmg` files; A9LL/W2 alpha output and observed A9LL animation keyframe output are supported |

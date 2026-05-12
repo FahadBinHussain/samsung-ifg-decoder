@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-VERSION = "0.9.0"
+VERSION = "0.10.0"
 IFEG_TYPE_65000001 = 0x65000001
 IFEG_TYPE_95000100 = 0x95000100
 IFEG_TYPE_150001_BASE = 0x15000100
@@ -99,6 +99,11 @@ class QmHeader:
     depth: int
     alpha_position: int
     header_size: int
+    is_animation: bool = False
+    total_frame_number: int = 1
+    current_frame_number: int = 1
+    animation_delay_time: int = 0
+    animation_no_repeat: int = 0
 
 
 @dataclass(frozen=True)
@@ -237,7 +242,7 @@ def parse_im_header(data: bytes) -> ImHeader:
 
 
 def parse_qm_header(data: bytes) -> QmHeader:
-    if len(data) < 16:
+    if len(data) < 12:
         raise ValueError("file is too small for a QM header")
     if data[:2] != b"QM":
         raise ValueError("not a QM file")
@@ -253,10 +258,24 @@ def parse_qm_header(data: bytes) -> QmHeader:
         raise ValueError(f"unsupported QM version 0x{version:02x}; this release supports QM 0x0B")
     if raw_type != 0x03:
         raise ValueError(f"unsupported QM raw type 0x{raw_type:02x}; this release supports RGBA5658 color data")
-    if flags4 & 0x80:
-        raise ValueError("QM animation frames are not supported yet")
     if width <= 0 or height <= 0:
         raise ValueError(f"invalid dimensions {width}x{height}")
+
+    is_animation = bool(flags4 & 0x80)
+    if is_animation:
+        if len(data) < 24:
+            raise ValueError("file is too small for a QM animation header")
+        total_frame_number = read_u16le(data, 16)
+        current_frame_number = read_u16le(data, 18)
+        animation_delay_time = read_u16le(data, 20)
+        animation_no_repeat = data[22]
+        header_size = 24
+    else:
+        total_frame_number = 1
+        current_frame_number = 1
+        animation_delay_time = 0
+        animation_no_repeat = 0
+        header_size = 16
 
     return QmHeader(
         width=width,
@@ -269,7 +288,12 @@ def parse_qm_header(data: bytes) -> QmHeader:
         alpha_depth=2 if flags5 & 0x20 else 1,
         depth=2 if flags5 & 0x40 else 1,
         alpha_position=read_u32le(data, 12),
-        header_size=16,
+        header_size=header_size,
+        is_animation=is_animation,
+        total_frame_number=total_frame_number,
+        current_frame_number=current_frame_number,
+        animation_delay_time=animation_delay_time,
+        animation_no_repeat=animation_no_repeat,
     )
 
 
@@ -676,13 +700,18 @@ def qm_alpha_sample_header(header: QmHeader) -> QmHeader:
         depth=header.alpha_depth,
         alpha_position=header.alpha_position,
         header_size=header.header_size,
+        is_animation=header.is_animation,
+        total_frame_number=header.total_frame_number,
+        current_frame_number=header.current_frame_number,
+        animation_delay_time=header.animation_delay_time,
+        animation_no_repeat=header.animation_no_repeat,
     )
 
 
 def decode_qm_a9ll_alpha(data: bytes, header: QmHeader, tables: CodecTables) -> list[int]:
     if header.encoder_mode != QM_ENCODER_A9LL:
         raise ValueError("QM A9LL alpha output requires an A9LL stream")
-    if header.alpha_depth != 2:
+    if header.alpha_depth not in (1, 2):
         raise ValueError(f"unsupported QM A9LL alpha depth {header.alpha_depth}")
     if not (header.header_size < header.alpha_position < len(data)):
         raise ValueError(f"invalid QM A9LL alpha position {header.alpha_position}")
@@ -938,6 +967,12 @@ def decode_qm_w2_alpha(data: bytes, header: QmHeader) -> list[int]:
 
 def decode_qm(data: bytes, tables: CodecTables) -> tuple[int, int, list[int]]:
     header = parse_qm_header(data)
+    if header.is_animation:
+        if header.current_frame_number != 1:
+            raise ValueError("QM animation delta frames are not supported yet")
+        if header.encoder_mode != QM_ENCODER_A9LL:
+            raise ValueError("QM animation keyframe support currently requires A9LL")
+
     if header.encoder_mode == QM_ENCODER_A9LL:
         return decode_qm_a9ll(data, header, tables)
 
@@ -980,6 +1015,8 @@ def decode_samsung_image(data: bytes, tables: CodecTables) -> tuple[int, int, li
             stream_label = f"W2D{header.depth}"
         else:
             stream_label = f"MODE{header.encoder_mode}"
+        if header.is_animation:
+            stream_label = f"{stream_label}_ANIM_KEY"
         return width, height, pixels, f"QM_0x{header.version:02X}_{stream_label}"
     supported = ", ".join(SUPPORTED_INPUT_LABELS)
     raise ValueError(f"unsupported image family; this release supports {supported}")
@@ -991,7 +1028,7 @@ def decode_samsung_alpha(data: bytes, tables: CodecTables) -> list[int] | None:
     header = parse_qm_header(data)
     if header.raw_type != 0x03:
         return None
-    if header.encoder_mode == QM_ENCODER_A9LL and header.alpha_depth == 2:
+    if header.encoder_mode == QM_ENCODER_A9LL and header.alpha_depth in (1, 2):
         return decode_qm_a9ll_alpha(data, header, tables)
     if header.encoder_mode == QM_ENCODER_W2_PASS and header.alpha_depth in (1, 2):
         return decode_qm_w2_alpha(data, header)

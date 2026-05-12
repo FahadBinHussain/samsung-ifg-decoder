@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.0
+
+- Decode observed `QM_0x0B_A9LL` animation keyframes as still images.
+- Decode observed A9LL alpha streams with alpha-depth flag `1` or `2`.
+- Document the observed QM animation header fields and first-frame support limit.
+
 ## 0.9.0
 
 - Include `.qmg` files in folder and recursive batch decoding.
