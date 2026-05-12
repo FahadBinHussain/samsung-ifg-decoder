@@ -91,6 +91,12 @@ Write a CSV manifest:
 python samsung_ifg_decoder.py input_folder output_folder --recursive --manifest decode_manifest.csv
 ```
 
+Inspect headers without decoding:
+
+```bash
+python samsung_ifg_decoder.py input_folder --inspect --recursive --manifest inspect_manifest.csv
+```
+
 ## What Files Do
 
 - `samsung_ifg_decoder.py` is the decoder and command-line tool.

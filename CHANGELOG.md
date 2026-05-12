@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.13.0
+
+- Add `--inspect` mode to print IFG/QMG/IM header and stream metadata without decoding.
+- Report QMG raw type, flags, header size, codec mode, alpha split point, and stream offsets.
+- Allow metadata-only inspection of observed `QM_0x0B` raw type `0x00` files while keeping decode support disabled for that raw type.
+
 ## 0.12.0
 
 - Add a stdlib `unittest` regression suite with synthetic decoder fixtures.

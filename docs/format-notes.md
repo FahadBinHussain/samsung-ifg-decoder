@@ -46,7 +46,7 @@ Observed B5722 `QM` files appear with both `.ifg` and `.qmg` extensions and begi
 | ---: | ---: | --- |
 | `0x00` | 2 | ASCII magic `QM` |
 | `0x02` | 1 | version; supported value `0x0B` |
-| `0x03` | 1 | raw type; observed value `0x03` for RGBA5658-style resources |
+| `0x03` | 1 | raw type; observed value `0x03` for RGBA5658-style resources and `0x00` for RGB565/no-alpha resources |
 | `0x04` | 1 | flags; bit `0x80` appears to mark animation frames |
 | `0x05` | 1 | codec flags; low three bits select the implemented stream variant |
 | `0x06` | 2 | width, little-endian `u16` |
@@ -56,7 +56,7 @@ Observed B5722 `QM` files appear with both `.ifg` and `.qmg` extensions and begi
 | `0x0c` | 4 | observed metadata/alpha-position field |
 | `0x10` | varies | codec body |
 
-For non-animated files, the codec body starts at `0x10`. For observed animation keyframes, the header extends through `0x17` and the codec body starts at `0x18`.
+For non-animated transparent files, the codec body starts at `0x10`. For observed raw type `0x00` files, the no-alpha header is shorter and the codec body starts at `0x0c`. For observed animation keyframes, the header extends through `0x17` and the codec body starts at `0x18`.
 
 Observed animation headers add:
 
@@ -68,7 +68,7 @@ Observed animation headers add:
 | `0x16` | 1 | no-repeat flag |
 | `0x17` | 1 | padding/unknown |
 
-The decoder exports the RGB565 color plane by default. With `--with-alpha`, it also exports decoded alpha for observed A9LL and W2 alpha streams as RGBA PNG. For observed `QM_0x0B_A9LL` animations, this release decodes the first/key frame as a still image; full multi-frame animation export is not implemented yet.
+The decoder exports the RGB565 color plane by default. With `--with-alpha`, it also exports decoded alpha for observed A9LL and W2 alpha streams as RGBA PNG. For observed `QM_0x0B_A9LL` animations, this release decodes the first/key frame as a still image; full multi-frame animation export is not implemented yet. Use `--inspect` to print metadata for unsupported or partially understood QMG files without decoding them.
 
 ## QM 0x0B A9LL Stream
 

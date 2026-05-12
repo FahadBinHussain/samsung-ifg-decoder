@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-VERSION = "0.12.0"
+VERSION = "0.13.0"
 IFEG_TYPE_65000001 = 0x65000001
 IFEG_TYPE_95000100 = 0x95000100
 IFEG_TYPE_150001_BASE = 0x15000100
@@ -30,6 +30,27 @@ SUPPORTED_INPUT_LABELS = (
 DEFAULT_TABLES_JSON = Path(__file__).resolve().parent / "codec_tables.json"
 SUPPORTED_OUTPUT_FORMATS = ("bmp", "png")
 SUPPORTED_INPUT_SUFFIXES = (".ifg", ".qmg")
+DECODE_MANIFEST_FIELDS = ["source", "output", "extra_outputs", "width", "height", "type", "status", "alpha", "error"]
+INSPECT_MANIFEST_FIELDS = [
+    "source",
+    "family",
+    "width",
+    "height",
+    "type",
+    "version",
+    "flags",
+    "header_size",
+    "codec",
+    "depth",
+    "alpha_depth",
+    "alpha_position",
+    "command_offset",
+    "raw_offset",
+    "stream_start",
+    "supported",
+    "notes",
+    "error",
+]
 QMAGE_DIFF = (
     0x0001, 0x0003, 0x0100, 0x0002, 0x0008, 0x0007, 0x0006, 0x0300,
     0x0010, 0x0004, 0x0200, 0x0009, 0x0040, 0x0018, 0x0005, 0x0020,
@@ -241,7 +262,7 @@ def parse_im_header(data: bytes) -> ImHeader:
     )
 
 
-def parse_qm_header(data: bytes) -> QmHeader:
+def parse_qm_header(data: bytes, strict: bool = True) -> QmHeader:
     if len(data) < 12:
         raise ValueError("file is too small for a QM header")
     if data[:2] != b"QM":
@@ -254,13 +275,14 @@ def parse_qm_header(data: bytes) -> QmHeader:
     width = read_u16le(data, 6)
     height = read_u16le(data, 8)
 
-    if version != QM_VERSION_0B:
+    if strict and version != QM_VERSION_0B:
         raise ValueError(f"unsupported QM version 0x{version:02x}; this release supports QM 0x0B")
-    if raw_type != 0x03:
+    if strict and raw_type != 0x03:
         raise ValueError(f"unsupported QM raw type 0x{raw_type:02x}; this release supports RGBA5658 color data")
     if width <= 0 or height <= 0:
         raise ValueError(f"invalid dimensions {width}x{height}")
 
+    transparency = raw_type in (0x03, 0x06)
     is_animation = bool(flags4 & 0x80)
     if is_animation:
         if len(data) < 24:
@@ -275,7 +297,9 @@ def parse_qm_header(data: bytes) -> QmHeader:
         current_frame_number = 1
         animation_delay_time = 0
         animation_no_repeat = 0
-        header_size = 16
+        header_size = 16 if transparency else 12
+
+    alpha_position = read_u32le(data, 12) if transparency or is_animation else 0
 
     return QmHeader(
         width=width,
@@ -287,7 +311,7 @@ def parse_qm_header(data: bytes) -> QmHeader:
         encoder_mode=flags5 & 0x07,
         alpha_depth=2 if flags5 & 0x20 else 1,
         depth=2 if flags5 & 0x40 else 1,
-        alpha_position=read_u32le(data, 12),
+        alpha_position=alpha_position,
         header_size=header_size,
         is_animation=is_animation,
         total_frame_number=total_frame_number,
@@ -1204,6 +1228,191 @@ def plan_batch_outputs(
     return planned_outputs
 
 
+def yes_no(value: bool) -> str:
+    return "yes" if value else "no"
+
+
+def qm_encoder_label(encoder_mode: int) -> str:
+    if encoder_mode == QM_ENCODER_A9LL:
+        return "A9LL"
+    if encoder_mode == QM_ENCODER_W2_PASS:
+        return "W2"
+    return f"MODE{encoder_mode}"
+
+
+def qm_type_label(header: QmHeader) -> str:
+    label = f"QM_0x{header.version:02X}_{qm_encoder_label(header.encoder_mode)}"
+    if header.encoder_mode == QM_ENCODER_W2_PASS:
+        label = f"{label}D{header.depth}"
+    if header.is_animation:
+        label = f"{label}_ANIM"
+    return label
+
+
+def qm_stream_offsets(data: bytes, header: QmHeader) -> tuple[str, str, str]:
+    if header.encoder_mode == QM_ENCODER_W2_PASS:
+        return "", "", str(header.header_size)
+    if len(data) < header.header_size + 8:
+        return "", "", ""
+    command_offset = read_u32le(data, header.header_size)
+    raw_offset = read_u32le(data, header.header_size + 4)
+    stream_start = header.header_size + 8
+    return str(command_offset), str(raw_offset), str(stream_start)
+
+
+def inspect_samsung_image(data: bytes) -> dict[str, str]:
+    row = {field: "" for field in INSPECT_MANIFEST_FIELDS}
+    row["supported"] = "no"
+
+    try:
+        if data[:4] == b"IFEG":
+            header = parse_ifeg_header(data)
+            supported = header.ifeg_type == IFEG_TYPE_65000001 or is_three_stream_ifeg_type(header.ifeg_type)
+            row.update(
+                {
+                    "family": "IFEG",
+                    "width": str(header.width),
+                    "height": str(header.height),
+                    "type": f"IFEG_0x{header.ifeg_type:08X}",
+                    "version": "",
+                    "header_size": "16",
+                    "raw_offset": str(header.raw_word_offset),
+                    "supported": yes_no(supported),
+                    "notes": "" if supported else "unsupported IFEG type",
+                }
+            )
+            return row
+
+        if data[:2] == b"IM":
+            width = read_u16le(data, 2) if len(data) >= 6 else 0
+            height = read_u16le(data, 4) if len(data) >= 6 else 0
+            flags = data[6] if len(data) > 6 else 0
+            version = data[7] if len(data) > 7 else 0
+            stream_header_offset = 13 if len(data) > 8 and data[8] & 0x40 else 9
+            command_offset = raw_offset = ""
+            if len(data) >= stream_header_offset + 8:
+                command_offset = str(read_u32le(data, stream_header_offset))
+                raw_offset = str(read_u32le(data, stream_header_offset + 4))
+            supported = version == 0x5D and not (flags & 0x80) and width > 0 and height > 0
+            notes: list[str] = []
+            if version != 0x5D:
+                notes.append("unsupported IM version")
+            if flags & 0x80:
+                notes.append("IM alpha-plane variant")
+            row.update(
+                {
+                    "family": "IM",
+                    "width": str(width) if width else "",
+                    "height": str(height) if height else "",
+                    "type": f"IM_0x{version:02X}",
+                    "version": f"0x{version:02X}",
+                    "flags": f"flags=0x{flags:02X};near_lossless={yes_no(bool(flags & 0x20))}",
+                    "header_size": str(stream_header_offset + 8),
+                    "command_offset": command_offset,
+                    "raw_offset": raw_offset,
+                    "stream_start": str(stream_header_offset + 8),
+                    "supported": yes_no(supported),
+                    "notes": ";".join(notes),
+                }
+            )
+            return row
+
+        if data[:2] == b"QM":
+            header = parse_qm_header(data, strict=False)
+            command_offset, raw_offset, stream_start = qm_stream_offsets(data, header)
+            can_attempt_decode = (
+                header.version == QM_VERSION_0B
+                and header.raw_type == 0x03
+                and header.encoder_mode in (QM_ENCODER_A9LL, QM_ENCODER_W2_PASS)
+                and (not header.is_animation or header.current_frame_number == 1)
+            )
+            notes = []
+            if header.version != QM_VERSION_0B:
+                notes.append("unsupported QM version")
+            if header.raw_type == 0x00:
+                notes.append("RGB565/no-alpha raw type; metadata-only support")
+            elif header.raw_type != 0x03:
+                notes.append("unsupported QM raw type")
+            if header.flags5 & 0x80:
+                notes.append("use_extra_exception flag set")
+            if header.is_animation and header.current_frame_number != 1:
+                notes.append("animation delta frame")
+            if header.encoder_mode == QM_ENCODER_W2_PASS and len(data) >= header.header_size + 12:
+                if header.depth == 2:
+                    notes.append(
+                        "w2_intermediate_size="
+                        f"{read_u32le(data, header.header_size)};"
+                        f"w2_control_size={read_u32le(data, header.header_size + 4)};"
+                        f"w2_index_size={read_u32le(data, header.header_size + 8)}"
+                    )
+                else:
+                    notes.append(
+                        "w2_table_count="
+                        f"{read_u32le(data, header.header_size)};"
+                        f"w2_index_size={read_u32le(data, header.header_size + 4)};"
+                        f"w2_run_size={read_u32le(data, header.header_size + 8)}"
+                    )
+            supported = yes_no(can_attempt_decode)
+            if can_attempt_decode and header.encoder_mode == QM_ENCODER_A9LL and header.flags5 & 0x80:
+                supported = "partial"
+            row.update(
+                {
+                    "family": "QM",
+                    "width": str(header.width),
+                    "height": str(header.height),
+                    "type": qm_type_label(header),
+                    "version": f"0x{header.version:02X}",
+                    "flags": (
+                        f"raw_type=0x{header.raw_type:02X};flags4=0x{header.flags4:02X};"
+                        f"flags5=0x{header.flags5:02X};animation={yes_no(header.is_animation)}"
+                    ),
+                    "header_size": str(header.header_size),
+                    "codec": qm_encoder_label(header.encoder_mode),
+                    "depth": str(header.depth),
+                    "alpha_depth": str(header.alpha_depth),
+                    "alpha_position": str(header.alpha_position) if header.alpha_position else "",
+                    "command_offset": command_offset,
+                    "raw_offset": raw_offset,
+                    "stream_start": stream_start,
+                    "supported": supported,
+                    "notes": ";".join(notes),
+                }
+            )
+            return row
+
+        row["error"] = "unsupported image family"
+        return row
+    except Exception as exc:
+        row["error"] = str(exc)
+        return row
+
+
+def inspect_one_file(input_path: Path) -> dict[str, str]:
+    row = inspect_samsung_image(input_path.read_bytes())
+    row["source"] = str(input_path)
+    return row
+
+
+def format_inspect_row(row: dict[str, str]) -> str:
+    dimensions = f"{row['width']}x{row['height']}" if row["width"] and row["height"] else "unknown-size"
+    parts = [row["source"], row["type"] or row["family"] or "unknown", dimensions, f"supported={row['supported']}"]
+    if row["codec"]:
+        parts.append(f"codec={row['codec']}")
+    if row["flags"]:
+        parts.append(row["flags"])
+    if row["command_offset"] and row["raw_offset"]:
+        parts.append(f"command={row['command_offset']} raw={row['raw_offset']}")
+    elif row["command_offset"]:
+        parts.append(f"command={row['command_offset']}")
+    elif row["raw_offset"]:
+        parts.append(f"raw={row['raw_offset']}")
+    if row["notes"]:
+        parts.append(f"notes={row['notes']}")
+    if row["error"]:
+        parts.append(f"error={row['error']}")
+    return " | ".join(parts)
+
+
 def decode_one_file(
     input_path: Path,
     output_path: Path,
@@ -1245,9 +1454,10 @@ def decode_one_file(
     }
 
 
-def write_manifest(path: Path, rows: list[dict[str, str]]) -> None:
+def write_manifest(path: Path, rows: list[dict[str, str]], fields: list[str] | None = None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    fields = ["source", "output", "extra_outputs", "width", "height", "type", "status", "alpha", "error"]
+    if fields is None:
+        fields = DECODE_MANIFEST_FIELDS
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields)
         writer.writeheader()
@@ -1261,7 +1471,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "IM 0x5D, and QM 0x0B."
     )
     parser.add_argument("input", type=Path, help="input .ifg/.qmg file or folder")
-    parser.add_argument("output", type=Path, help="output .bmp/.png file, or output folder for batch mode")
+    parser.add_argument("output", type=Path, nargs="?", help="output .bmp/.png file, or output folder for batch mode")
+    parser.add_argument("--inspect", action="store_true", help="print image headers and stream metadata without decoding")
     parser.add_argument("--recursive", action="store_true", help="recurse into input folders")
     parser.add_argument("--tables", type=Path, default=DEFAULT_TABLES_JSON, help="codec table JSON path")
     parser.add_argument("--format", choices=SUPPORTED_OUTPUT_FORMATS, default="bmp", help="batch output format")
@@ -1274,12 +1485,27 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_arg_parser().parse_args(argv)
-    tables = load_codec_tables(args.tables)
+    parser = build_arg_parser()
+    args = parser.parse_args(argv)
 
     input_path = args.input
-    output_path = args.output
     input_files = iter_input_files(input_path, recursive=args.recursive)
+
+    if args.inspect:
+        rows = []
+        for source in input_files:
+            row = inspect_one_file(source)
+            rows.append(row)
+            print(format_inspect_row(row))
+        if args.manifest:
+            write_manifest(args.manifest, rows, INSPECT_MANIFEST_FIELDS)
+        return 1 if any(row["error"] for row in rows) else 0
+
+    if args.output is None:
+        parser.error("output is required unless --inspect is used")
+
+    tables = load_codec_tables(args.tables)
+    output_path = args.output
 
     if input_path.is_file() and output_path.suffix:
         if args.with_alpha and output_path.suffix.lower() != ".png":
@@ -1313,7 +1539,7 @@ def main(argv: list[str] | None = None) -> int:
         rows.append(row)
 
     if args.manifest:
-        write_manifest(args.manifest, rows)
+        write_manifest(args.manifest, rows, DECODE_MANIFEST_FIELDS)
 
     return 1 if any(row["status"] == "failed" for row in rows) else 0
 
