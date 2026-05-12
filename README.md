@@ -1,8 +1,8 @@
 # samsung-ifg-decoder
 
-Open-source Samsung IFG / IFEG / IM image decoder for legacy phone firmware assets.
+Open-source Samsung IFG / IFEG / IM / QM image decoder for legacy phone firmware assets.
 
-This project decodes a subset of Samsung `.ifg` images used in older feature-phone firmware. Current releases support `IFEG` images with types `0x65000001`, `0x95000100`, and `0x150001xx`, plus `IM` version `0x5D`, including many image assets found in Samsung B5722 firmware.
+This project decodes a subset of Samsung `.ifg` images used in older feature-phone firmware. Current releases support `IFEG` images with types `0x65000001`, `0x95000100`, and `0x150001xx`, `IM` version `0x5D`, and observed `QM` version `0x0B` images, including many image assets found in Samsung B5722 firmware.
 
 ## Status
 
@@ -13,6 +13,7 @@ Supported:
 - Type: `0x95000100`
 - Type family: `0x150001xx`
 - `IM` magic: `49 4D`, version byte `0x5D`
+- `QM` magic: `51 4D`, version byte `0x0B`, observed A9LL and W2 depth-2 streams
 - Output: 24-bit `.bmp` or `.png`
 - Single-file decode
 - Folder/batch decode
@@ -20,7 +21,7 @@ Supported:
 
 Not supported yet:
 
-- `QM` / QMG
+- Other `QM` / QMG versions, animation frames, and alpha-plane output
 - `IM` alpha-plane variants
 - Encoding BMP/JPG back to IFG
 
@@ -92,7 +93,7 @@ These are `IFEG_65000001`, usually `240x960`. Use `--split-240x320-panels` to ex
 
 ## Example B5722 UI Assets
 
-B5722 firmware also contains many `IFEG_95000100`, `IFEG_150001xx`, and `IM_0x5D` images, especially widget, menu, dialpad, and UI assets. They can be decoded with the same commands:
+B5722 firmware also contains many `IFEG_95000100`, `IFEG_150001xx`, `IM_0x5D`, and `QM_0x0B` images, especially widget, menu, dialpad, and UI assets. They can be decoded with the same commands:
 
 ```bash
 python samsung_ifg_decoder.py input.ifg output.png
@@ -106,6 +107,6 @@ Users must provide their own `.ifg` files. This project is intended for preserva
 
 ## Roadmap
 
-- Investigate `QM` / QMG handling.
+- Broaden `QM` / QMG version coverage and alpha-plane output.
 - Investigate `IM` alpha-plane variants.
 - Add automated tests with redistributable synthetic fixtures.

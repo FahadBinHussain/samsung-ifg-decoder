@@ -1,6 +1,6 @@
 # Format Notes
 
-These notes document the currently implemented Samsung `IFEG_65000001`, `IFEG_95000100`, `IFEG_150001xx`, and `IM_0x5D` paths. They are incomplete and will change as more IFG variants are decoded.
+These notes document the currently implemented Samsung `IFEG_65000001`, `IFEG_95000100`, `IFEG_150001xx`, `IM_0x5D`, and `QM_0x0B` paths. They are incomplete and will change as more IFG variants are decoded.
 
 ## IFEG Header
 
@@ -37,6 +37,73 @@ For non-alpha `IM_0x5D` files, the stream header contains two little-endian spli
 | `data[0x08] & 0x40 != 0` | `0x0d` | `0x15` | `u32 @ 0x0d` | `u32 @ 0x11` |
 
 `IM` files with the high bit set in `data[0x06]` appear to include alpha-plane metadata and are not implemented yet.
+
+## QM 0x0B Header
+
+Observed B5722 `QM` files begin with:
+
+| Offset | Size | Meaning |
+| ---: | ---: | --- |
+| `0x00` | 2 | ASCII magic `QM` |
+| `0x02` | 1 | version; supported value `0x0B` |
+| `0x03` | 1 | raw type; observed value `0x03` for RGBA5658-style resources |
+| `0x04` | 1 | flags; bit `0x80` appears to mark animation frames |
+| `0x05` | 1 | codec flags; low three bits select the implemented stream variant |
+| `0x06` | 2 | width, little-endian `u16` |
+| `0x08` | 2 | height, little-endian `u16` |
+| `0x0a` | 1 | additional flags |
+| `0x0b` | 1 | additional flags |
+| `0x0c` | 4 | observed metadata/alpha-position field |
+| `0x10` | varies | codec body |
+
+The decoder currently exports the RGB565 color plane. It does not emit the separate alpha plane yet, even when the header raw type suggests RGBA5658.
+
+## QM 0x0B A9LL Stream
+
+For observed files where `data[0x05] & 0x07 == 0`, the body uses a `4x4` tile grid with three streams:
+
+| Offset | Size | Meaning |
+| ---: | ---: | --- |
+| `0x10` | 4 | command stream absolute offset |
+| `0x14` | 4 | raw/mask stream absolute offset |
+| `0x18` | varies | control bitstream |
+
+Each tile starts with a 2-bit mode from the control stream:
+
+| Mode | Meaning |
+| ---: | --- |
+| `0` | mixed tile using reference pixel `x - 1, y` |
+| `1` | mixed tile using reference pixel `x, y - 1` |
+| `2` | mixed tile using reference pixel `x - 1, y - 1` |
+| `3` | copy from previous pixel for the whole tile when `x > 0` |
+
+Mixed tiles read a 16-bit mask from the raw/mask stream. A set mask bit copies from the reference pixel. A clear mask bit reads a 3-bit command from the command stream. Command `7` reads a raw 16-bit pixel; other commands read `command + 1` extra bits from the control stream and apply a delta from:
+
+```text
+codec_tables.json -> tables.delta16_decode_b.values_signed[2:258]
+```
+
+## QM 0x0B W2 Stream
+
+For observed files where `data[0x05] & 0x07 == 1`, the body starts at `0x10` and uses the W2 pass. B5722 samples use depth `2` (`data[0x05] & 0x40 != 0`), which first expands an intermediate buffer and then runs the W2 depth-1 table/RLE pass.
+
+The implemented depth-2 body begins with:
+
+| Body offset | Size | Meaning |
+| ---: | ---: | --- |
+| `0x00` | 4 | intermediate W2 depth-1 buffer size |
+| `0x04` | 4 | control bitstream byte count |
+| `0x08` | 4 | index/exception stream byte count |
+| `0x0c` | varies | control bitstream, then index/exception stream, then raw stream |
+
+The intermediate depth-1 buffer begins with:
+
+| Offset | Size | Meaning |
+| ---: | ---: | --- |
+| `0x00` | 4 | 32-bit table entry count |
+| `0x04` | 4 | index stream byte count |
+| `0x08` | 4 | run stream byte count |
+| `0x10` | varies | 32-bit table entries, index stream, run stream, raw stream |
 
 ## Tile Layout
 
@@ -143,4 +210,4 @@ Observed in B5722 firmware:
 | `IFEG_95000100` | supported |
 | `IFEG_15000100` / `IFEG_150001xx` | supported |
 | `IM_0x5D` | supported for observed non-alpha B5722 files |
-| `QM` | not yet supported |
+| `QM_0x0B` | supported for observed B5722 A9LL and W2 depth-2 files |

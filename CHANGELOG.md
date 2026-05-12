@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.0
+
+- Add support for observed Samsung B5722 `QM_0x0B` images.
+- Decode the A9LL stream variant used by TouchWiz widget and missed-event icons.
+- Decode the W2 depth-2 stream variant used by softkey/background assets.
+- Update README and format notes with the recovered `QM` header and stream layout.
+
 ## 0.5.0
 
 - Add support for observed non-alpha `IM_0x5D` images from Samsung B5722 firmware.

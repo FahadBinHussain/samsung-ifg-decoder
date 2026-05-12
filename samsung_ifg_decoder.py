@@ -11,15 +11,58 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-VERSION = "0.5.0"
+VERSION = "0.6.0"
 IFEG_TYPE_65000001 = 0x65000001
 IFEG_TYPE_95000100 = 0x95000100
 IFEG_TYPE_150001_BASE = 0x15000100
 IFEG_TYPE_150001_MASK = 0xFFFFFF00
+QM_VERSION_0B = 0x0B
+QM_ENCODER_A9LL = 0
+QM_ENCODER_W2_PASS = 1
 SUPPORTED_IFEG_TYPE_LABELS = ("0x65000001", "0x95000100", "0x150001xx")
-SUPPORTED_INPUT_LABELS = ("IFEG 0x65000001", "IFEG 0x95000100", "IFEG 0x150001xx", "IM 0x5D")
+SUPPORTED_INPUT_LABELS = (
+    "IFEG 0x65000001",
+    "IFEG 0x95000100",
+    "IFEG 0x150001xx",
+    "IM 0x5D",
+    "QM 0x0B",
+)
 DEFAULT_TABLES_JSON = Path(__file__).resolve().parent / "codec_tables.json"
 SUPPORTED_OUTPUT_FORMATS = ("bmp", "png")
+QMAGE_DIFF = (
+    0x0001, 0x0003, 0x0100, 0x0002, 0x0008, 0x0007, 0x0006, 0x0300,
+    0x0010, 0x0004, 0x0200, 0x0009, 0x0040, 0x0018, 0x0005, 0x0020,
+    0x000C, 0x000E, 0x000F, 0x000A, 0x00C0, 0x0800, 0x0700, 0x0101,
+    0x0400, 0x000B, 0x0030, 0x0011, 0x0080, 0x0600, 0x000D, 0x0012,
+    0x001C, 0x0500, 0x001B, 0x001E, 0x0014, 0x001A, 0x0028, 0x0038,
+    0x1000, 0x001F, 0x0019, 0x0016, 0x0060, 0x2000, 0x0013, 0x001D,
+    0x0103, 0x0024, 0x0017, 0x0015, 0x0102, 0x01C0, 0x0F00, 0x003C,
+    0x0301, 0x0C00, 0x1800, 0x0048, 0x0021, 0x0034, 0x0E00, 0x0202,
+    0x002C, 0x0070, 0x0A00, 0x0303, 0x0036, 0x0201, 0x003F, 0x0D00,
+    0x0180, 0x003E, 0x3000, 0x0900, 0x0078, 0x0022, 0x0050, 0x003A,
+    0x0041, 0x0107, 0x0033, 0x0106, 0x0026, 0x002A, 0x00A0, 0x0023,
+    0x0029, 0x0088, 0x0044, 0x003D, 0x00E0, 0x0032, 0x002E, 0x0039,
+    0x0031, 0x002D, 0x00F0, 0x0140, 0x0B00, 0x003B, 0x0058, 0x4000,
+    0x0037, 0x0035, 0x0068, 0x0302, 0x007C, 0x002F, 0x0027, 0x0064,
+    0x0090, 0x0074, 0x0203, 0x0104, 0x006C, 0x1100, 0x03C0, 0x00FF,
+    0x0025, 0xF000, 0x1F00, 0x0701, 0x0042, 0x007F, 0x002B, 0x0105,
+    0x0054, 0x1C00, 0x004C, 0x0801, 0x0043, 0x6000, 0x005C, 0x007E,
+    0x00E8, 0x0108, 0x00F8, 0xE000, 0x0206, 0x1E00, 0x0380, 0x0061,
+    0x007A, 0x004E, 0x0601, 0x1001, 0x00C8, 0x8000, 0x1D00, 0x00D0,
+    0x0072, 0x0049, 0x1600, 0x1A00, 0x0046, 0x7000, 0x010F, 0x0110,
+    0x0076, 0x1200, 0x1400, 0x0404, 0x0606, 0x010E, 0x00FC, 0x1700,
+    0x006E, 0x00FE, 0x1300, 0x0062, 0x0066, 0xC000, 0x0204, 0x0306,
+    0x0063, 0x0707, 0x0280, 0x0602, 0x0055, 0x0047, 0x006A, 0x010C,
+    0x0052, 0x0501, 0x00D8, 0x0307, 0x0073, 0x0109, 0x0808, 0x0401,
+    0x004A, 0x2020, 0x005A, 0x0702, 0x00B0, 0x0045, 0x0207, 0x0304,
+    0x0402, 0x005E, 0x010A, 0x0079, 0x3800, 0x00F4, 0x1500, 0x01E0,
+    0x1B00, 0x0071, 0x1010, 0x00C1, 0x00E4, 0x0502, 0x0056, 0x007D,
+    0x0081, 0x0077, 0x00CC, 0x0703, 0x010D, 0x0205, 0x0340, 0x5000,
+    0x0082, 0x0067, 0xFF00, 0x0120, 0x0069, 0x0098, 0x00C3, 0x1900,
+    0x0065, 0x007B, 0x0240, 0x0603, 0x00EC, 0x0059, 0x00FA, 0x0403,
+    0x0075, 0x006F, 0x3100, 0x3300, 0x004F, 0x00B8, 0x006D, 0x0208,
+    0x004D, 0x0111, 0x0051, 0x020E, 0x00DC, 0x00C4, 0x2100, 0x00A8,
+)
 
 
 @dataclass(frozen=True)
@@ -40,6 +83,19 @@ class ImHeader:
     command_offset: int
     raw_offset: int
     near_lossless: bool
+
+
+@dataclass(frozen=True)
+class QmHeader:
+    width: int
+    height: int
+    version: int
+    raw_type: int
+    flags4: int
+    flags5: int
+    encoder_mode: int
+    depth: int
+    header_size: int
 
 
 @dataclass(frozen=True)
@@ -71,6 +127,47 @@ class BitReader:
             result = (result << 1) | ((self.data[byte_index] >> (7 - bit_in_byte)) & 1)
             self.bit_position += 1
         return result
+
+
+class ByteReader:
+    def __init__(self, data: bytes, offset: int = 0) -> None:
+        self.data = data
+        self.offset = offset
+
+    def peek_u8(self) -> int:
+        if self.offset >= len(self.data):
+            return 0
+        return self.data[self.offset]
+
+    def read_u8(self) -> int:
+        if self.offset >= len(self.data):
+            raise EOFError(f"byte read past end at byte {self.offset}")
+        value = self.data[self.offset]
+        self.offset += 1
+        return value
+
+    def read_u16le(self) -> int:
+        if self.offset + 2 > len(self.data):
+            raise EOFError(f"u16 read past end at byte {self.offset}")
+        value = read_u16le(self.data, self.offset)
+        self.offset += 2
+        return value
+
+    def read_u32le(self) -> int:
+        if self.offset + 4 > len(self.data):
+            raise EOFError(f"u32 read past end at byte {self.offset}")
+        value = read_u32le(self.data, self.offset)
+        self.offset += 4
+        return value
+
+    def read_bytes(self, size: int) -> bytes:
+        if size < 0:
+            raise ValueError(f"negative read size {size}")
+        if self.offset + size > len(self.data):
+            raise EOFError(f"byte block read past end at byte {self.offset}")
+        value = self.data[self.offset : self.offset + size]
+        self.offset += size
+        return value
 
 
 def read_u16le(data: bytes, offset: int) -> int:
@@ -133,6 +230,41 @@ def parse_im_header(data: bytes) -> ImHeader:
         command_offset=command_offset,
         raw_offset=raw_offset,
         near_lossless=bool(flags & 0x20),
+    )
+
+
+def parse_qm_header(data: bytes) -> QmHeader:
+    if len(data) < 16:
+        raise ValueError("file is too small for a QM header")
+    if data[:2] != b"QM":
+        raise ValueError("not a QM file")
+
+    version = data[2]
+    raw_type = data[3]
+    flags4 = data[4]
+    flags5 = data[5]
+    width = read_u16le(data, 6)
+    height = read_u16le(data, 8)
+
+    if version != QM_VERSION_0B:
+        raise ValueError(f"unsupported QM version 0x{version:02x}; this release supports QM 0x0B")
+    if raw_type != 0x03:
+        raise ValueError(f"unsupported QM raw type 0x{raw_type:02x}; this release supports RGBA5658 color data")
+    if flags4 & 0x80:
+        raise ValueError("QM animation frames are not supported yet")
+    if width <= 0 or height <= 0:
+        raise ValueError(f"invalid dimensions {width}x{height}")
+
+    return QmHeader(
+        width=width,
+        height=height,
+        version=version,
+        raw_type=raw_type,
+        flags4=flags4,
+        flags5=flags5,
+        encoder_mode=flags5 & 0x07,
+        depth=2 if flags5 & 0x40 else 1,
+        header_size=16,
     )
 
 
@@ -435,6 +567,261 @@ def decode_im_v5d_16bit(data: bytes, tables: CodecTables) -> tuple[int, int, lis
     return header.width, header.height, pixels
 
 
+def qm_ref_pixel(pixels: list[int], width: int, height: int, x: int, y: int) -> int:
+    if 0 <= x < width and 0 <= y < height:
+        return pixels[y * width + x]
+    return 0
+
+
+def decode_qm_a9ll(data: bytes, header: QmHeader, tables: CodecTables) -> tuple[int, int, list[int]]:
+    if len(data) < header.header_size + 8:
+        raise ValueError("QM A9LL file is too small for stream split points")
+
+    command_offset = read_u32le(data, header.header_size)
+    raw_offset = read_u32le(data, header.header_size + 4)
+    stream_start = header.header_size + 8
+    if not (stream_start <= command_offset <= raw_offset <= len(data)):
+        raise ValueError(f"invalid QM A9LL stream split points: {command_offset}, {raw_offset}")
+
+    control_bits = BitReader(data[stream_start:], bit_position=1)
+    command_bits = BitReader(data[command_offset:], bit_position=1)
+    raw_words = ByteReader(data, raw_offset)
+    delta_table = tables.delta16_decode_b[2:258]
+    pixels = [0] * (header.width * header.height)
+    directions = [(-1, 0), (0, -1), (-1, -1)]
+
+    def set_pixel(x: int, y: int, value: int) -> None:
+        if 0 <= x < header.width and 0 <= y < header.height:
+            pixels[y * header.width + x] = value & 0xFFFF
+
+    def copy_edge_tile(x: int, y: int, tile_w: int, tile_h: int) -> None:
+        for yy in range(tile_h):
+            for xx in range(tile_w):
+                set_pixel(x + xx, y + yy, qm_ref_pixel(pixels, header.width, header.height, x + xx - 1, y + yy))
+
+    for y in range(0, header.height, 4):
+        for x in range(0, header.width, 4):
+            tile_w = min(4, header.width - x)
+            tile_h = min(4, header.height - y)
+            mode = control_bits.read(2)
+
+            if mode < 3:
+                mask = raw_words.read_u16le()
+                mask_bit = 0
+                ref_x_delta, ref_y_delta = directions[mode]
+                for yy in range(4):
+                    for xx in range(4):
+                        if x + xx >= header.width or y + yy >= header.height:
+                            continue
+
+                        ref_value = qm_ref_pixel(
+                            pixels,
+                            header.width,
+                            header.height,
+                            x + xx + ref_x_delta,
+                            y + yy + ref_y_delta,
+                        )
+                        if mask & (1 << mask_bit):
+                            set_pixel(x + xx, y + yy, ref_value)
+                        else:
+                            command = command_bits.read(3)
+                            if command == 7:
+                                set_pixel(x + xx, y + yy, raw_words.read_u16le())
+                            else:
+                                extra = control_bits.read(command + 1)
+                                table_index = (2 << command) + extra - 2
+                                if table_index >= len(delta_table):
+                                    raise ValueError(f"QM A9LL delta table index out of range: {table_index}")
+                                set_pixel(x + xx, y + yy, ref_value + delta_table[table_index])
+                        mask_bit += 1
+            elif x > 0:
+                copy_edge_tile(x, y, tile_w, tile_h)
+
+    return header.width, header.height, pixels
+
+
+def write_u16le_buffer(data: bytearray, offset: int, value: int) -> None:
+    struct.pack_into("<H", data, offset, value & 0xFFFF)
+
+
+def read_qm_w2_value(reader: ByteReader) -> int:
+    value = 0
+    while reader.peek_u8() == 0xFF:
+        reader.read_u8()
+        value += 0xFF
+    return value + reader.read_u8()
+
+
+def decode_qm_w2_depth1(header: QmHeader, data: bytes) -> list[int]:
+    if len(data) < 16:
+        raise ValueError("QM W2 depth-1 body is too small")
+
+    table_count = read_u32le(data, 0)
+    index_size = read_u32le(data, 4)
+    run_size = read_u32le(data, 8)
+    index_start = 16 + table_count * 4
+    run_start = index_start + index_size
+    raw_start = run_start + run_size
+    if not (16 <= index_start < len(data) and index_start <= run_start < len(data) and run_start <= raw_start <= len(data)):
+        raise ValueError(
+            "invalid QM W2 depth-1 stream split points: "
+            f"{table_count}, {index_size}, {run_size}, size={len(data)}"
+        )
+
+    index_reader = ByteReader(data[index_start:])
+    run_reader = ByteReader(data[run_start:])
+    raw_reader = ByteReader(data[raw_start:])
+    output_size = header.width * header.height * 2
+    output = bytearray(output_size)
+    cursor = 0
+
+    while cursor < output_size:
+        index = read_qm_w2_value(index_reader)
+        if index == 0:
+            value = raw_reader.read_u32le()
+            encoded = value.to_bytes(4, "little")
+            writable = min(4, output_size - cursor)
+            output[cursor : cursor + writable] = encoded[:writable]
+            cursor += 4
+            continue
+
+        table_index = index - 1
+        if table_index >= table_count:
+            raise ValueError(f"QM W2 table index out of range: {table_index}")
+        run = read_qm_w2_value(run_reader) + 1
+        value = data[16 + table_index * 4 : 16 + table_index * 4 + 4]
+        write_count = min(run, max(0, (output_size - cursor) // 4))
+        for _ in range(write_count):
+            output[cursor : cursor + 4] = value
+            cursor += 4
+        if write_count < run:
+            cursor += 4 * (run - write_count)
+
+    return [read_u16le(output, offset) for offset in range(0, output_size, 2)]
+
+
+def qm_w2_strip1(
+    bit_reader: BitReader,
+    index_reader: ByteReader,
+    raw_reader: ByteReader,
+    rel: list[int],
+    output: bytearray,
+    cursor: int,
+) -> None:
+    output[cursor : cursor + 4] = raw_reader.read_bytes(4)
+    cursor += 4
+
+    for index in range(6):
+        if not (index & 1) and not bit_reader.read(1):
+            rel[0] = index_reader.read_u8() if bit_reader.read(1) else raw_reader.read_u16le()
+
+        if not bit_reader.read(1):
+            if not bit_reader.read(1):
+                ref_offset = cursor - rel[0] * 2
+                if ref_offset < 0:
+                    raise ValueError("invalid QM W2 strip reference")
+                value = read_u16le(output, ref_offset) ^ QMAGE_DIFF[index_reader.read_u8()]
+            else:
+                value = raw_reader.read_u16le()
+        else:
+            ref_offset = cursor - rel[0] * 2
+            if ref_offset < 0:
+                raise ValueError("invalid QM W2 strip copy reference")
+            value = read_u16le(output, ref_offset)
+        write_u16le_buffer(output, cursor, value)
+        cursor += 2
+
+
+def qm_w2_strip2(
+    bit_reader: BitReader,
+    index_reader: ByteReader,
+    raw_reader: ByteReader,
+    rel: list[int],
+    output: bytearray,
+    cursor: int,
+) -> None:
+    mask = index_reader.read_u8()
+    for index in range(8):
+        if not (index & 1) and not bit_reader.read(1):
+            rel[0] = index_reader.read_u8() if bit_reader.read(1) else raw_reader.read_u16le()
+
+        if not (mask & (1 << (7 - index))):
+            if not bit_reader.read(1):
+                ref_offset = cursor - rel[0] * 2
+                if ref_offset < 0:
+                    raise ValueError("invalid QM W2 strip reference")
+                value = read_u16le(output, ref_offset) ^ QMAGE_DIFF[index_reader.read_u8()]
+            else:
+                value = raw_reader.read_u16le()
+        else:
+            ref_offset = cursor - rel[0] * 2
+            if ref_offset < 0:
+                raise ValueError("invalid QM W2 strip copy reference")
+            value = read_u16le(output, ref_offset)
+        write_u16le_buffer(output, cursor, value)
+        cursor += 2
+
+
+def decode_qm_w2_depth2(header: QmHeader, data: bytes) -> list[int]:
+    if len(data) < 12:
+        raise ValueError("QM W2 depth-2 body is too small")
+
+    intermediate_size = read_u32le(data, 0)
+    if intermediate_size < 16:
+        raise ValueError(f"invalid QM W2 intermediate size {intermediate_size}")
+    control_size = read_u32le(data, 4)
+    index_size = read_u32le(data, 8)
+    if 12 + control_size + index_size > len(data):
+        raise ValueError(
+            "invalid QM W2 depth-2 stream split points: "
+            f"{control_size}, {index_size}, size={len(data)}"
+        )
+
+    bit_reader = BitReader(data[12:], bit_position=1)
+    index_reader = ByteReader(data[12 + control_size :])
+    raw_reader = ByteReader(data[12 + control_size + index_size :])
+    intermediate = bytearray(intermediate_size)
+    rel = [1]
+
+    qm_w2_strip1(bit_reader, index_reader, raw_reader, rel, intermediate, 0)
+    cursor = 16
+    while cursor < (intermediate_size & ~15):
+        if not bit_reader.read(1):
+            if not bit_reader.read(1):
+                intermediate[cursor : cursor + 16] = raw_reader.read_bytes(16)
+            else:
+                ref_offset = cursor - rel[0] * 2
+                if ref_offset < 0:
+                    raise ValueError("invalid QM W2 block copy reference")
+                for index in range(8):
+                    write_u16le_buffer(intermediate, cursor + index * 2, read_u16le(intermediate, ref_offset + index * 2))
+        else:
+            qm_w2_strip2(bit_reader, index_reader, raw_reader, rel, intermediate, cursor)
+        cursor += 16
+
+    remainder = intermediate_size & 15
+    if remainder:
+        intermediate[cursor : cursor + remainder] = index_reader.read_bytes(remainder)
+
+    return decode_qm_w2_depth1(header, bytes(intermediate))
+
+
+def decode_qm(data: bytes, tables: CodecTables) -> tuple[int, int, list[int]]:
+    header = parse_qm_header(data)
+    if header.encoder_mode == QM_ENCODER_A9LL:
+        return decode_qm_a9ll(data, header, tables)
+
+    if header.encoder_mode == QM_ENCODER_W2_PASS:
+        body = data[header.header_size :]
+        if header.depth == 1:
+            return header.width, header.height, decode_qm_w2_depth1(header, body)
+        if header.depth == 2:
+            return header.width, header.height, decode_qm_w2_depth2(header, body)
+        raise ValueError(f"unsupported QM W2 depth {header.depth}")
+
+    raise ValueError(f"unsupported QM encoder mode {header.encoder_mode}")
+
+
 def decode_ifeg(data: bytes, tables: CodecTables) -> tuple[int, int, list[int]]:
     header = parse_ifeg_header(data)
     if header.ifeg_type == IFEG_TYPE_65000001:
@@ -454,6 +841,16 @@ def decode_samsung_image(data: bytes, tables: CodecTables) -> tuple[int, int, li
         header = parse_im_header(data)
         width, height, pixels = decode_im_v5d_16bit(data, tables)
         return width, height, pixels, f"IM_0x{header.version:02X}"
+    if data[:2] == b"QM":
+        header = parse_qm_header(data)
+        width, height, pixels = decode_qm(data, tables)
+        if header.encoder_mode == QM_ENCODER_A9LL:
+            stream_label = "A9LL"
+        elif header.encoder_mode == QM_ENCODER_W2_PASS:
+            stream_label = f"W2D{header.depth}"
+        else:
+            stream_label = f"MODE{header.encoder_mode}"
+        return width, height, pixels, f"QM_0x{header.version:02X}_{stream_label}"
     supported = ", ".join(SUPPORTED_INPUT_LABELS)
     raise ValueError(f"unsupported image family; this release supports {supported}")
 
@@ -598,7 +995,8 @@ def write_manifest(path: Path, rows: list[dict[str, str]]) -> None:
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Decode Samsung IFG/IFEG/IM images from legacy phone firmware. "
-        "This release supports IFEG types 0x65000001, 0x95000100, 0x150001xx, and IM 0x5D."
+        "This release supports IFEG types 0x65000001, 0x95000100, 0x150001xx, "
+        "IM 0x5D, and QM 0x0B."
     )
     parser.add_argument("input", type=Path, help="input .ifg file or folder")
     parser.add_argument("output", type=Path, help="output .bmp/.png file, or output folder for batch mode")
