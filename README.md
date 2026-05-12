@@ -15,13 +15,14 @@ Supported:
 - `IM` magic: `49 4D`, version byte `0x5D`
 - `QM` magic: `51 4D`, version byte `0x0B`, observed A9LL and W2 depth-2 streams
 - Output: 24-bit `.bmp` or `.png`
+- Optional RGBA `.png` output for observed `QM_0x0B_A9LL` alpha planes
 - Single-file decode
 - Folder/batch decode
 - Optional split of `240x960` idle wallpapers into `240x320` panels
 
 Not supported yet:
 
-- Other `QM` / QMG versions, animation frames, and alpha-plane output
+- Other `QM` / QMG versions, animation frames, and W2 alpha-plane output
 - `IM` alpha-plane variants
 - Encoding BMP/JPG back to IFG
 
@@ -60,6 +61,12 @@ Decode a folder recursively:
 
 ```bash
 python samsung_ifg_decoder.py input_folder output_folder --recursive
+```
+
+Write RGBA PNG when a supported alpha plane is present:
+
+```bash
+python samsung_ifg_decoder.py input.ifg output.png --with-alpha
 ```
 
 Decode wallpapers and split `240x960` idle images into three `240x320` panels:
@@ -107,6 +114,6 @@ Users must provide their own `.ifg` files. This project is intended for preserva
 
 ## Roadmap
 
-- Broaden `QM` / QMG version coverage and alpha-plane output.
+- Broaden `QM` / QMG version coverage, W2 alpha-plane output, and animation handling.
 - Investigate `IM` alpha-plane variants.
 - Add automated tests with redistributable synthetic fixtures.

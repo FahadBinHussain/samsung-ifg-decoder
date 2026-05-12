@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.0
+
+- Add opt-in `--with-alpha` PNG output.
+- Decode observed `QM_0x0B_A9LL` alpha planes as RGBA PNG.
+- Leave unsupported alpha planes opaque during batch alpha export instead of failing the whole run.
+
 ## 0.6.0
 
 - Add support for observed Samsung B5722 `QM_0x0B` images.

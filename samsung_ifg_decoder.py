@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-VERSION = "0.6.0"
+VERSION = "0.7.0"
 IFEG_TYPE_65000001 = 0x65000001
 IFEG_TYPE_95000100 = 0x95000100
 IFEG_TYPE_150001_BASE = 0x15000100
@@ -94,7 +94,9 @@ class QmHeader:
     flags4: int
     flags5: int
     encoder_mode: int
+    alpha_depth: int
     depth: int
+    alpha_position: int
     header_size: int
 
 
@@ -263,7 +265,9 @@ def parse_qm_header(data: bytes) -> QmHeader:
         flags4=flags4,
         flags5=flags5,
         encoder_mode=flags5 & 0x07,
+        alpha_depth=2 if flags5 & 0x20 else 1,
         depth=2 if flags5 & 0x40 else 1,
+        alpha_position=read_u32le(data, 12),
         header_size=16,
     )
 
@@ -640,6 +644,86 @@ def decode_qm_a9ll(data: bytes, header: QmHeader, tables: CodecTables) -> tuple[
     return header.width, header.height, pixels
 
 
+def decode_qm_a9ll_alpha(data: bytes, header: QmHeader, tables: CodecTables) -> list[int]:
+    if header.encoder_mode != QM_ENCODER_A9LL:
+        raise ValueError("QM alpha output is currently supported for A9LL streams only")
+    if header.alpha_depth != 2:
+        raise ValueError(f"unsupported QM A9LL alpha depth {header.alpha_depth}")
+    if not (header.header_size < header.alpha_position < len(data)):
+        raise ValueError(f"invalid QM alpha position {header.alpha_position}")
+
+    body = data[header.alpha_position :]
+    if len(body) < 8:
+        raise ValueError("QM A9LL alpha body is too small")
+
+    command_offset = read_u32le(body, 0)
+    raw_offset = read_u32le(body, 4)
+    if not (8 <= command_offset <= raw_offset <= len(body)):
+        raise ValueError(f"invalid QM A9LL alpha split points: {command_offset}, {raw_offset}")
+
+    sample_width = (header.width + 1) // 2
+    samples = [0] * (sample_width * header.height)
+    control_bits = BitReader(body[8:raw_offset], bit_position=1)
+    command_bits = BitReader(body[command_offset:raw_offset], bit_position=1)
+    raw_words = ByteReader(body, raw_offset)
+    delta_table = tables.delta16_decode_b[2:258]
+    directions = [(-1, 0), (0, -1), (-1, -1)]
+
+    def get_sample(x: int, y: int) -> int:
+        if 0 <= x < sample_width and 0 <= y < header.height:
+            return samples[y * sample_width + x]
+        return 0
+
+    def set_sample(x: int, y: int, value: int) -> None:
+        if 0 <= x < sample_width and 0 <= y < header.height:
+            samples[y * sample_width + x] = value & 0xFFFF
+
+    for y in range(0, header.height, 4):
+        for sample_x in range(0, sample_width, 4):
+            mode = control_bits.read(2)
+            tile_w = min(4, sample_width - sample_x)
+            tile_h = min(4, header.height - y)
+
+            if mode < 3:
+                mask = raw_words.read_u16le()
+                mask_bit = 0
+                ref_x_delta, ref_y_delta = directions[mode]
+                for yy in range(4):
+                    for xx in range(4):
+                        if sample_x + xx >= sample_width or y + yy >= header.height:
+                            continue
+
+                        ref_value = get_sample(sample_x + xx + ref_x_delta, y + yy + ref_y_delta)
+                        if mask & (1 << mask_bit):
+                            set_sample(sample_x + xx, y + yy, ref_value)
+                        else:
+                            command = command_bits.read(3)
+                            if command == 7:
+                                set_sample(sample_x + xx, y + yy, raw_words.read_u16le())
+                            else:
+                                extra = control_bits.read(command + 1)
+                                table_index = (2 << command) + extra - 2
+                                if table_index >= len(delta_table):
+                                    raise ValueError(f"QM alpha delta table index out of range: {table_index}")
+                                set_sample(sample_x + xx, y + yy, ref_value + delta_table[table_index])
+                        mask_bit += 1
+            elif sample_x > 0:
+                for yy in range(tile_h):
+                    for xx in range(tile_w):
+                        set_sample(sample_x + xx, y + yy, get_sample(sample_x + xx - 1, y + yy))
+
+    alpha = [255] * (header.width * header.height)
+    for y in range(header.height):
+        for sample_x in range(sample_width):
+            value = get_sample(sample_x, y)
+            x = sample_x * 2
+            if x < header.width:
+                alpha[y * header.width + x] = value & 0xFF
+            if x + 1 < header.width:
+                alpha[y * header.width + x + 1] = (value >> 8) & 0xFF
+    return alpha
+
+
 def write_u16le_buffer(data: bytearray, offset: int, value: int) -> None:
     struct.pack_into("<H", data, offset, value & 0xFFFF)
 
@@ -855,6 +939,15 @@ def decode_samsung_image(data: bytes, tables: CodecTables) -> tuple[int, int, li
     raise ValueError(f"unsupported image family; this release supports {supported}")
 
 
+def decode_samsung_alpha(data: bytes, tables: CodecTables) -> list[int] | None:
+    if data[:2] != b"QM":
+        return None
+    header = parse_qm_header(data)
+    if header.raw_type != 0x03 or header.encoder_mode != QM_ENCODER_A9LL or header.alpha_depth != 2:
+        return None
+    return decode_qm_a9ll_alpha(data, header, tables)
+
+
 def rgb565_to_rgb888(value: int, bgr565: bool = False) -> tuple[int, int, int]:
     value &= 0xFFFF
     if bgr565:
@@ -913,6 +1006,34 @@ def write_png_rgb888(path: Path, width: int, height: int, pixels: list[int], bgr
     path.write_bytes(payload)
 
 
+def write_png_rgba888(
+    path: Path,
+    width: int,
+    height: int,
+    pixels: list[int],
+    alpha: list[int],
+    bgr565: bool = False,
+) -> None:
+    if len(alpha) != width * height:
+        raise ValueError(f"alpha plane has {len(alpha)} pixels, expected {width * height}")
+
+    scanlines = bytearray()
+    for y in range(height):
+        scanlines.append(0)
+        for x in range(width):
+            r, g, b = rgb565_to_rgb888(pixels[y * width + x], bgr565=bgr565)
+            scanlines.extend((r, g, b, alpha[y * width + x] & 0xFF))
+
+    payload = bytearray()
+    payload += b"\x89PNG\r\n\x1a\n"
+    payload += png_chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0))
+    payload += png_chunk(b"IDAT", zlib.compress(bytes(scanlines)))
+    payload += png_chunk(b"IEND", b"")
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(payload)
+
+
 def write_image_rgb888(path: Path, width: int, height: int, pixels: list[int], bgr565: bool = False) -> None:
     suffix = path.suffix.lower()
     if suffix == ".bmp":
@@ -962,10 +1083,23 @@ def decode_one_file(
     tables: CodecTables,
     bgr565: bool,
     split_panels: bool,
+    with_alpha: bool,
 ) -> dict[str, str]:
     data = input_path.read_bytes()
     width, height, pixels, type_label = decode_samsung_image(data, tables)
-    write_image_rgb888(output_path, width, height, pixels, bgr565=bgr565)
+    alpha_status = ""
+    if with_alpha:
+        if output_path.suffix.lower() != ".png":
+            raise ValueError("--with-alpha requires PNG output")
+        alpha = decode_samsung_alpha(data, tables)
+        if alpha is None:
+            alpha = [255] * (width * height)
+            alpha_status = "opaque"
+        else:
+            alpha_status = "decoded"
+        write_png_rgba888(output_path, width, height, pixels, alpha, bgr565=bgr565)
+    else:
+        write_image_rgb888(output_path, width, height, pixels, bgr565=bgr565)
 
     extra_outputs: list[str] = []
     if split_panels:
@@ -979,13 +1113,14 @@ def decode_one_file(
         "height": str(height),
         "type": type_label,
         "status": "decoded",
+        "alpha": alpha_status,
         "error": "",
     }
 
 
 def write_manifest(path: Path, rows: list[dict[str, str]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    fields = ["source", "output", "extra_outputs", "width", "height", "type", "status", "error"]
+    fields = ["source", "output", "extra_outputs", "width", "height", "type", "status", "alpha", "error"]
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields)
         writer.writeheader()
@@ -1005,6 +1140,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--format", choices=SUPPORTED_OUTPUT_FORMATS, default="bmp", help="batch output format")
     parser.add_argument("--bgr565", action="store_true", help="interpret decoded 16-bit pixels as BGR565")
     parser.add_argument("--split-240x320-panels", action="store_true", help="also split 240x960 wallpapers into 240x320 panels")
+    parser.add_argument("--with-alpha", action="store_true", help="write PNG with decoded alpha when supported")
     parser.add_argument("--manifest", type=Path, help="write a CSV decode manifest")
     parser.add_argument("--version", action="version", version=f"samsung-ifg-decoder {VERSION}")
     return parser
@@ -1019,19 +1155,23 @@ def main(argv: list[str] | None = None) -> int:
     input_files = iter_input_files(input_path, recursive=args.recursive)
 
     if input_path.is_file() and output_path.suffix:
+        if args.with_alpha and output_path.suffix.lower() != ".png":
+            print("--with-alpha requires a .png output path", file=sys.stderr)
+            return 2
         planned_outputs = {input_path: output_path}
         input_root = None
     else:
         input_root = input_path if input_path.is_dir() else None
+        output_format = "png" if args.with_alpha else args.format
         planned_outputs = {
-            path: default_output_for_file(path, input_root, output_path, args.format)
+            path: default_output_for_file(path, input_root, output_path, output_format)
             for path in input_files
         }
 
     rows: list[dict[str, str]] = []
     for source, target in planned_outputs.items():
         try:
-            row = decode_one_file(source, target, tables, args.bgr565, args.split_240x320_panels)
+            row = decode_one_file(source, target, tables, args.bgr565, args.split_240x320_panels, args.with_alpha)
             print(f"decoded {source} -> {target} ({row['width']}x{row['height']})")
         except Exception as exc:
             row = {
@@ -1042,6 +1182,7 @@ def main(argv: list[str] | None = None) -> int:
                 "height": "",
                 "type": "",
                 "status": "failed",
+                "alpha": "",
                 "error": str(exc),
             }
             print(f"failed {source}: {exc}", file=sys.stderr)

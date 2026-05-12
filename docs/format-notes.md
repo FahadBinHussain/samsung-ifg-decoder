@@ -56,7 +56,7 @@ Observed B5722 `QM` files begin with:
 | `0x0c` | 4 | observed metadata/alpha-position field |
 | `0x10` | varies | codec body |
 
-The decoder currently exports the RGB565 color plane. It does not emit the separate alpha plane yet, even when the header raw type suggests RGBA5658.
+The decoder exports the RGB565 color plane by default. With `--with-alpha`, it also exports decoded alpha for observed A9LL alpha streams as RGBA PNG.
 
 ## QM 0x0B A9LL Stream
 
@@ -82,6 +82,18 @@ Mixed tiles read a 16-bit mask from the raw/mask stream. A set mask bit copies f
 ```text
 codec_tables.json -> tables.delta16_decode_b.values_signed[2:258]
 ```
+
+## QM 0x0B A9LL Alpha Stream
+
+Observed A9LL alpha bodies start at the header's `0x0c` split point. The alpha body begins with two offsets relative to the alpha body:
+
+| Body offset | Size | Meaning |
+| ---: | ---: | --- |
+| `0x00` | 4 | command stream offset |
+| `0x04` | 4 | raw/mask stream offset |
+| `0x08` | varies | control bitstream |
+
+The decoded alpha samples are packed two pixels per 16-bit value: low byte first, high byte second. The tile grid is therefore `4x4` over packed samples, equivalent to `8x4` output pixels. Mixed alpha tiles use the same 2-bit mode, 16-bit mask, 3-bit command, raw word, and delta-table pattern as the color A9LL stream.
 
 ## QM 0x0B W2 Stream
 
@@ -210,4 +222,4 @@ Observed in B5722 firmware:
 | `IFEG_95000100` | supported |
 | `IFEG_15000100` / `IFEG_150001xx` | supported |
 | `IM_0x5D` | supported for observed non-alpha B5722 files |
-| `QM_0x0B` | supported for observed B5722 A9LL and W2 depth-2 files |
+| `QM_0x0B` | supported for observed B5722 A9LL and W2 depth-2 files; A9LL alpha output is supported with `--with-alpha` |
