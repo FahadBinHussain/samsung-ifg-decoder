@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.0
+
+- Decode observed `QM_0x0B_W2` alpha planes with `--with-alpha`.
+- Reuse the W2 depth-1/depth-2 decompressor for packed alpha samples.
+- Document the W2 alpha stream offset and packed alpha output layout.
+
 ## 0.7.0
 
 - Add opt-in `--with-alpha` PNG output.

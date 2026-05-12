@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-VERSION = "0.7.0"
+VERSION = "0.8.0"
 IFEG_TYPE_65000001 = 0x65000001
 IFEG_TYPE_95000100 = 0x95000100
 IFEG_TYPE_150001_BASE = 0x15000100
@@ -644,13 +644,47 @@ def decode_qm_a9ll(data: bytes, header: QmHeader, tables: CodecTables) -> tuple[
     return header.width, header.height, pixels
 
 
+def unpack_qm_alpha_samples(header: QmHeader, samples: list[int]) -> list[int]:
+    sample_width = (header.width + 1) // 2
+    expected_samples = sample_width * header.height
+    if len(samples) < expected_samples:
+        raise ValueError(f"alpha stream decoded {len(samples)} packed samples, expected {expected_samples}")
+
+    alpha = [255] * (header.width * header.height)
+    for y in range(header.height):
+        for sample_x in range(sample_width):
+            value = samples[y * sample_width + sample_x]
+            x = sample_x * 2
+            if x < header.width:
+                alpha[y * header.width + x] = value & 0xFF
+            if x + 1 < header.width:
+                alpha[y * header.width + x + 1] = (value >> 8) & 0xFF
+    return alpha
+
+
+def qm_alpha_sample_header(header: QmHeader) -> QmHeader:
+    return QmHeader(
+        width=(header.width + 1) // 2,
+        height=header.height,
+        version=header.version,
+        raw_type=header.raw_type,
+        flags4=header.flags4,
+        flags5=header.flags5,
+        encoder_mode=header.encoder_mode,
+        alpha_depth=header.alpha_depth,
+        depth=header.alpha_depth,
+        alpha_position=header.alpha_position,
+        header_size=header.header_size,
+    )
+
+
 def decode_qm_a9ll_alpha(data: bytes, header: QmHeader, tables: CodecTables) -> list[int]:
     if header.encoder_mode != QM_ENCODER_A9LL:
-        raise ValueError("QM alpha output is currently supported for A9LL streams only")
+        raise ValueError("QM A9LL alpha output requires an A9LL stream")
     if header.alpha_depth != 2:
         raise ValueError(f"unsupported QM A9LL alpha depth {header.alpha_depth}")
     if not (header.header_size < header.alpha_position < len(data)):
-        raise ValueError(f"invalid QM alpha position {header.alpha_position}")
+        raise ValueError(f"invalid QM A9LL alpha position {header.alpha_position}")
 
     body = data[header.alpha_position :]
     if len(body) < 8:
@@ -661,8 +695,9 @@ def decode_qm_a9ll_alpha(data: bytes, header: QmHeader, tables: CodecTables) -> 
     if not (8 <= command_offset <= raw_offset <= len(body)):
         raise ValueError(f"invalid QM A9LL alpha split points: {command_offset}, {raw_offset}")
 
-    sample_width = (header.width + 1) // 2
-    samples = [0] * (sample_width * header.height)
+    sample_header = qm_alpha_sample_header(header)
+    sample_width = sample_header.width
+    samples = [0] * (sample_width * sample_header.height)
     control_bits = BitReader(body[8:raw_offset], bit_position=1)
     command_bits = BitReader(body[command_offset:raw_offset], bit_position=1)
     raw_words = ByteReader(body, raw_offset)
@@ -712,16 +747,7 @@ def decode_qm_a9ll_alpha(data: bytes, header: QmHeader, tables: CodecTables) -> 
                     for xx in range(tile_w):
                         set_sample(sample_x + xx, y + yy, get_sample(sample_x + xx - 1, y + yy))
 
-    alpha = [255] * (header.width * header.height)
-    for y in range(header.height):
-        for sample_x in range(sample_width):
-            value = get_sample(sample_x, y)
-            x = sample_x * 2
-            if x < header.width:
-                alpha[y * header.width + x] = value & 0xFF
-            if x + 1 < header.width:
-                alpha[y * header.width + x + 1] = (value >> 8) & 0xFF
-    return alpha
+    return unpack_qm_alpha_samples(header, samples)
 
 
 def write_u16le_buffer(data: bytearray, offset: int, value: int) -> None:
@@ -890,6 +916,25 @@ def decode_qm_w2_depth2(header: QmHeader, data: bytes) -> list[int]:
     return decode_qm_w2_depth1(header, bytes(intermediate))
 
 
+def decode_qm_w2_alpha(data: bytes, header: QmHeader) -> list[int]:
+    if header.encoder_mode != QM_ENCODER_W2_PASS:
+        raise ValueError("QM W2 alpha output requires a W2 stream")
+    if header.alpha_depth not in (1, 2):
+        raise ValueError(f"unsupported QM W2 alpha depth {header.alpha_depth}")
+
+    alpha_offset = header.header_size + header.alpha_position
+    if not (header.header_size < alpha_offset < len(data)):
+        raise ValueError(f"invalid QM W2 alpha position {header.alpha_position}")
+
+    sample_header = qm_alpha_sample_header(header)
+    body = data[alpha_offset:]
+    if header.alpha_depth == 1:
+        samples = decode_qm_w2_depth1(sample_header, body)
+    else:
+        samples = decode_qm_w2_depth2(sample_header, body)
+    return unpack_qm_alpha_samples(header, samples)
+
+
 def decode_qm(data: bytes, tables: CodecTables) -> tuple[int, int, list[int]]:
     header = parse_qm_header(data)
     if header.encoder_mode == QM_ENCODER_A9LL:
@@ -943,9 +988,13 @@ def decode_samsung_alpha(data: bytes, tables: CodecTables) -> list[int] | None:
     if data[:2] != b"QM":
         return None
     header = parse_qm_header(data)
-    if header.raw_type != 0x03 or header.encoder_mode != QM_ENCODER_A9LL or header.alpha_depth != 2:
+    if header.raw_type != 0x03:
         return None
-    return decode_qm_a9ll_alpha(data, header, tables)
+    if header.encoder_mode == QM_ENCODER_A9LL and header.alpha_depth == 2:
+        return decode_qm_a9ll_alpha(data, header, tables)
+    if header.encoder_mode == QM_ENCODER_W2_PASS and header.alpha_depth in (1, 2):
+        return decode_qm_w2_alpha(data, header)
+    return None
 
 
 def rgb565_to_rgb888(value: int, bgr565: bool = False) -> tuple[int, int, int]:

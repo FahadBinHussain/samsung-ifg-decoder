@@ -56,7 +56,7 @@ Observed B5722 `QM` files begin with:
 | `0x0c` | 4 | observed metadata/alpha-position field |
 | `0x10` | varies | codec body |
 
-The decoder exports the RGB565 color plane by default. With `--with-alpha`, it also exports decoded alpha for observed A9LL alpha streams as RGBA PNG.
+The decoder exports the RGB565 color plane by default. With `--with-alpha`, it also exports decoded alpha for observed A9LL and W2 alpha streams as RGBA PNG.
 
 ## QM 0x0B A9LL Stream
 
@@ -116,6 +116,12 @@ The intermediate depth-1 buffer begins with:
 | `0x04` | 4 | index stream byte count |
 | `0x08` | 4 | run stream byte count |
 | `0x10` | varies | 32-bit table entries, index stream, run stream, raw stream |
+
+## QM 0x0B W2 Alpha Stream
+
+Observed W2 alpha bodies start at `0x10 + header[0x0c]`. The alpha body uses the same W2 depth-1 or depth-2 stream layout as the color body, selected by the alpha-depth bit in `data[0x05]`.
+
+Like A9LL alpha, W2 alpha output is packed two pixels per 16-bit value: low byte first, high byte second. The decoder therefore runs W2 over a sample image whose width is `(width + 1) // 2`, then expands the packed samples to one alpha byte per output pixel.
 
 ## Tile Layout
 
@@ -222,4 +228,4 @@ Observed in B5722 firmware:
 | `IFEG_95000100` | supported |
 | `IFEG_15000100` / `IFEG_150001xx` | supported |
 | `IM_0x5D` | supported for observed non-alpha B5722 files |
-| `QM_0x0B` | supported for observed B5722 A9LL and W2 depth-2 files; A9LL alpha output is supported with `--with-alpha` |
+| `QM_0x0B` | supported for observed B5722 A9LL and W2 depth-2 files; A9LL and W2 alpha output is supported with `--with-alpha` |
