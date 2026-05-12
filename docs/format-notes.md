@@ -129,6 +129,8 @@ The intermediate depth-1 buffer begins with:
 | `0x08` | 4 | run stream byte count |
 | `0x10` | varies | 32-bit table entries, index stream, run stream, raw stream |
 
+The final depth-1 pass emits pixels in 32-bit groups containing two RGB565 pixels. If the destination image has an odd pixel count, the stream can end after the final complete 32-bit group; the decoder fills the remaining 16-bit tail pixel from the previous pixel.
+
 ## QM 0x0B W2 Alpha Stream
 
 Observed W2 alpha bodies start at `0x10 + header[0x0c]`. The alpha body uses the same W2 depth-1 or depth-2 stream layout as the color body, selected by the alpha-depth bit in `data[0x05]`.

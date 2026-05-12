@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-VERSION = "0.10.0"
+VERSION = "0.11.0"
 IFEG_TYPE_65000001 = 0x65000001
 IFEG_TYPE_95000100 = 0x95000100
 IFEG_TYPE_150001_BASE = 0x15000100
@@ -815,13 +815,12 @@ def decode_qm_w2_depth1(header: QmHeader, data: bytes) -> list[int]:
     output = bytearray(output_size)
     cursor = 0
 
-    while cursor < output_size:
+    while cursor + 4 <= output_size:
         index = read_qm_w2_value(index_reader)
         if index == 0:
             value = raw_reader.read_u32le()
             encoded = value.to_bytes(4, "little")
-            writable = min(4, output_size - cursor)
-            output[cursor : cursor + writable] = encoded[:writable]
+            output[cursor : cursor + 4] = encoded
             cursor += 4
             continue
 
@@ -830,12 +829,17 @@ def decode_qm_w2_depth1(header: QmHeader, data: bytes) -> list[int]:
             raise ValueError(f"QM W2 table index out of range: {table_index}")
         run = read_qm_w2_value(run_reader) + 1
         value = data[16 + table_index * 4 : 16 + table_index * 4 + 4]
-        write_count = min(run, max(0, (output_size - cursor) // 4))
+        write_count = min(run, (output_size - cursor) // 4)
         for _ in range(write_count):
             output[cursor : cursor + 4] = value
             cursor += 4
         if write_count < run:
-            cursor += 4 * (run - write_count)
+            break
+
+    while cursor < output_size:
+        if cursor >= 2:
+            output[cursor : cursor + 2] = output[cursor - 2 : cursor]
+        cursor += 2
 
     return [read_u16le(output, offset) for offset in range(0, output_size, 2)]
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.11.0
+
+- Fix W2 depth-1 decoding for odd pixel counts.
+- Decode the observed horizontal QMG zoom-bar asset that ends with a single 16-bit tail pixel.
+- Document W2's 32-bit output grouping and odd-tail handling.
+
 ## 0.10.0
 
 - Decode observed `QM_0x0B_A9LL` animation keyframes as still images.
