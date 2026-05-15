@@ -56,7 +56,7 @@ Observed B5722 `QM` files appear with both `.ifg` and `.qmg` extensions and begi
 | `0x0c` | 4 | observed metadata/alpha-position field |
 | `0x10` | varies | codec body |
 
-For non-animated transparent files, the codec body starts at `0x10`. For observed raw type `0x00` files, the no-alpha header is shorter and the codec body starts at `0x0c`. For observed animation keyframes, the header extends through `0x17` and the codec body starts at `0x18`.
+For non-animated transparent files, the codec body starts at `0x10`. For observed raw type `0x00` RGB565/no-alpha files, the shorter header is supported and the codec body starts at `0x0c`. For observed animation keyframes, the header extends through `0x17` and the codec body starts at `0x18`.
 
 Observed animation headers add:
 
@@ -246,4 +246,4 @@ Observed in B5722 firmware:
 | `IFEG_95000100` | supported |
 | `IFEG_15000100` / `IFEG_150001xx` | supported |
 | `IM_0x5D` | supported for observed non-alpha B5722 files |
-| `QM_0x0B` | supported for observed B5722 A9LL and W2 depth-2 `.ifg` / `.qmg` files; A9LL/W2 alpha output and observed A9LL animation keyframe output are supported |
+| `QM_0x0B` | supported for observed B5722 A9LL, raw type `0x00` A9LL, and W2 depth-2 `.ifg` / `.qmg` files; A9LL/W2 alpha output and observed A9LL animation keyframe output are supported |

@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-VERSION = "0.17.0"
+VERSION = "0.18.0"
 IFEG_TYPE_65000001 = 0x65000001
 IFEG_TYPE_95000100 = 0x95000100
 IFEG_TYPE_150001_BASE = 0x15000100
@@ -20,6 +20,9 @@ QM_VERSION_0B = 0x0B
 QM_ENCODER_A9LL = 0
 QM_ENCODER_W2_PASS = 1
 QM_FLAG_USE_EXTRA_EXCEPTION = 0x80
+QM_RAW_TYPE_RGB565_NO_ALPHA = 0x00
+QM_RAW_TYPE_RGBA5658 = 0x03
+SUPPORTED_QM_RAW_TYPES = (QM_RAW_TYPE_RGB565_NO_ALPHA, QM_RAW_TYPE_RGBA5658)
 SUPPORTED_IFEG_TYPE_LABELS = ("0x65000001", "0x95000100", "0x150001xx")
 SUPPORTED_INPUT_LABELS = (
     "IFEG 0x65000001",
@@ -304,12 +307,15 @@ def parse_qm_header(data: bytes, strict: bool = True) -> QmHeader:
 
     if strict and version != QM_VERSION_0B:
         raise ValueError(f"unsupported QM version 0x{version:02x}; this release supports QM 0x0B")
-    if strict and raw_type != 0x03:
-        raise ValueError(f"unsupported QM raw type 0x{raw_type:02x}; this release supports RGBA5658 color data")
+    if strict and raw_type not in SUPPORTED_QM_RAW_TYPES:
+        raise ValueError(
+            f"unsupported QM raw type 0x{raw_type:02x}; "
+            "this release supports RGB565 no-alpha and RGBA5658 color data"
+        )
     if width <= 0 or height <= 0:
         raise ValueError(f"invalid dimensions {width}x{height}")
 
-    transparency = raw_type in (0x03, 0x06)
+    transparency = raw_type in (QM_RAW_TYPE_RGBA5658, 0x06)
     is_animation = bool(flags4 & 0x80)
     if is_animation:
         if len(data) < 24:
@@ -1159,7 +1165,7 @@ def decode_samsung_alpha(data: bytes, tables: CodecTables) -> list[int] | None:
     if data[:2] != b"QM":
         return None
     header = parse_qm_header(data)
-    if header.raw_type != 0x03:
+    if header.raw_type != QM_RAW_TYPE_RGBA5658:
         return None
     if header.encoder_mode == QM_ENCODER_A9LL and header.alpha_depth in (1, 2):
         return decode_qm_a9ll_alpha(data, header, tables)
@@ -1427,16 +1433,16 @@ def inspect_samsung_image(data: bytes) -> dict[str, str]:
             command_offset, raw_offset, stream_start = qm_stream_offsets(data, header)
             can_attempt_decode = (
                 header.version == QM_VERSION_0B
-                and header.raw_type == 0x03
+                and header.raw_type in SUPPORTED_QM_RAW_TYPES
                 and header.encoder_mode in (QM_ENCODER_A9LL, QM_ENCODER_W2_PASS)
                 and (not header.is_animation or header.current_frame_number == 1)
             )
             notes = []
             if header.version != QM_VERSION_0B:
                 notes.append("unsupported QM version")
-            if header.raw_type == 0x00:
-                notes.append("RGB565/no-alpha raw type; metadata-only support")
-            elif header.raw_type != 0x03:
+            if header.raw_type == QM_RAW_TYPE_RGB565_NO_ALPHA:
+                notes.append("RGB565/no-alpha raw type")
+            elif header.raw_type not in SUPPORTED_QM_RAW_TYPES:
                 notes.append("unsupported QM raw type")
             if qm_has_extra_exception(header):
                 notes.append("use_extra_exception flag set")
@@ -1517,7 +1523,7 @@ def format_inspect_row(row: dict[str, str]) -> str:
 
 
 def qm_a9ll_color_raw_limit(data: bytes, header: QmHeader, raw_start: int) -> int:
-    if header.raw_type in (0x03, 0x06) and raw_start < header.alpha_position <= len(data):
+    if header.raw_type in (QM_RAW_TYPE_RGBA5658, 0x06) and raw_start < header.alpha_position <= len(data):
         return header.alpha_position
     return len(data)
 

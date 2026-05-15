@@ -64,15 +64,12 @@ class AlphaPackingTests(unittest.TestCase):
 
 
 class InspectTests(unittest.TestCase):
-    def test_inspect_reports_qm_raw_type_0_without_enabling_decode(self) -> None:
+    def test_inspect_reports_qm_raw_type_0_as_supported_no_alpha(self) -> None:
         data = b"QM" + bytes([decoder.QM_VERSION_0B, 0x00, 0x00, 0xC0])
         data += struct.pack("<HHBB", 8, 13, 0, 0)
         data += struct.pack("<II", 32, 36)
 
-        with self.assertRaisesRegex(ValueError, "raw type"):
-            decoder.parse_qm_header(data)
-
-        header = decoder.parse_qm_header(data, strict=False)
+        header = decoder.parse_qm_header(data)
         self.assertEqual(header.raw_type, 0x00)
         self.assertEqual(header.header_size, 12)
 
@@ -82,8 +79,8 @@ class InspectTests(unittest.TestCase):
         self.assertEqual(row["height"], "13")
         self.assertEqual(row["command_offset"], "32")
         self.assertEqual(row["raw_offset"], "36")
-        self.assertEqual(row["supported"], "no")
-        self.assertIn("raw type", row["notes"])
+        self.assertEqual(row["supported"], "yes")
+        self.assertIn("RGB565/no-alpha", row["notes"])
 
     def test_inspect_reports_w2_body_fields_without_a9ll_offsets(self) -> None:
         data = b"QM" + bytes([decoder.QM_VERSION_0B, 0x03, 0x00, 0x61])
@@ -115,9 +112,9 @@ class AnalyzeTests(unittest.TestCase):
 
     def test_analyze_keeps_decode_failure_separate_from_stream_walk(self) -> None:
         tables = decoder.CodecTables([], [], [])
-        data = b"QM" + bytes([decoder.QM_VERSION_0B, 0x00, 0x00, 0xC0])
-        data += struct.pack("<HHBB", 4, 4, 0, 0)
-        data += struct.pack("<II", 21, 21)
+        data = b"QM" + bytes([decoder.QM_VERSION_0B, 0x06, 0x00, 0xC0])
+        data += struct.pack("<HHBBI", 4, 4, 0, 0, 0)
+        data += struct.pack("<II", 25, 25)
         data += b"\xC0"
 
         row = decoder.analyze_samsung_image(data, tables)
@@ -165,6 +162,23 @@ class AnalyzeTests(unittest.TestCase):
 
 
 class QmA9llTests(unittest.TestCase):
+    def test_raw_type_0_decodes_a9ll_rgb565_without_alpha(self) -> None:
+        tables = decoder.CodecTables([], [], [0] * 512)
+        tables.delta16_decode_b[256] = 1
+        data = b"QM" + bytes([decoder.QM_VERSION_0B, decoder.QM_RAW_TYPE_RGB565_NO_ALPHA, 0x00, decoder.QM_FLAG_USE_EXTRA_EXCEPTION])
+        data += struct.pack("<HHBB", 4, 4, 0, 0)
+        data += struct.pack("<II", 22, 23)
+        data += b"\x20\x00"
+        data += b"\xE0"
+        data += b"\xFC\xFF"
+        data += b"\x34\x12"
+
+        width, height, pixels, type_label = decoder.decode_samsung_image(data, tables)
+        self.assertEqual((width, height), (4, 4))
+        self.assertEqual(type_label, "QM_0x0B_A9LL")
+        self.assertEqual(pixels[:4], [0x1234, 0x1235, 0x1235, 0x1235])
+        self.assertIsNone(decoder.decode_samsung_alpha(data, tables))
+
     def test_use_extra_exception_decodes_raw_flag_and_command_7_delta(self) -> None:
         tables = decoder.CodecTables([], [], [0] * 512)
         tables.delta16_decode_b[256] = 1

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.18.0
+
+- Decode observed `QM_0x0B` raw type `0x00` RGB565/no-alpha A9LL files.
+- Mark raw type `0x00` QMG files as supported in `--inspect` instead of metadata-only.
+- Keep alpha export disabled for raw type `0x00` because those files do not carry an alpha plane.
+
 ## 0.17.0
 
 - Decode observed A9LL `use_extra_exception` QMG streams.
