@@ -29,6 +29,14 @@ def qm_header(width: int, height: int, *, depth: int = 1) -> decoder.QmHeader:
     )
 
 
+def qm_animation_header_bytes(width: int, height: int, current: int, total: int = 2) -> bytes:
+    return (
+        b"QM"
+        + bytes([decoder.QM_VERSION_0B, decoder.QM_RAW_TYPE_RGBA5658, 0x80, decoder.QM_ENCODER_A9LL])
+        + struct.pack("<HHBBIHHHBB", width, height, 0, 0, 40, total, current, 0, 1, 0)
+    )
+
+
 class BitReaderTests(unittest.TestCase):
     def test_reads_msb_first_from_one_based_position(self) -> None:
         reader = decoder.BitReader(bytes([0b1010_0101]), bit_position=1)
@@ -204,6 +212,30 @@ class QmA9llTests(unittest.TestCase):
         self.assertEqual(row["control_bits_read"], "12")
         self.assertEqual(row["raw_bytes_read"], "4")
         self.assertEqual(row["raw_overrun_bytes"], "0")
+
+
+class QmAnimationTests(unittest.TestCase):
+    def test_split_qm_animation_frames_uses_embedded_frame_headers(self) -> None:
+        frame1 = qm_animation_header_bytes(16, 16, current=1) + struct.pack("<II", 32, 32)
+        frame2 = qm_animation_header_bytes(16, 16, current=2) + struct.pack("<II", 32, 0)
+
+        frames = decoder.split_qm_animation_frames(frame1 + frame2)
+
+        self.assertEqual([frame.offset for frame in frames], [0, len(frame1)])
+        self.assertEqual([frame.header.current_frame_number for frame in frames], [1, 2])
+
+    def test_animation_delta_macroblock_can_copy_previous_frame(self) -> None:
+        tables = decoder.CodecTables([], [], [0] * 512)
+        ref_pixels = list(range(16 * 16))
+        data = qm_animation_header_bytes(16, 16, current=2)
+        data += struct.pack("<II", 33, 0)
+        data += b"\xC0"
+        header = decoder.parse_qm_header(data)
+
+        width, height, pixels = decoder.decode_qm_a9ll_animation_delta(data, header, tables, ref_pixels)
+
+        self.assertEqual((width, height), (16, 16))
+        self.assertEqual(pixels, ref_pixels)
 
 
 class ColorTests(unittest.TestCase):

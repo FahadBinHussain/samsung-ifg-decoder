@@ -68,7 +68,7 @@ Observed animation headers add:
 | `0x16` | 1 | no-repeat flag |
 | `0x17` | 1 | padding/unknown |
 
-The decoder exports the RGB565 color plane by default. With `--with-alpha`, it also exports decoded alpha for observed A9LL and W2 alpha streams as RGBA PNG. For observed `QM_0x0B_A9LL` animations, this release decodes the first/key frame as a still image; full multi-frame animation export is not implemented yet. Use `--inspect` to print metadata for unsupported or partially understood QMG files without decoding them. Use `--analyze` to additionally attempt decoding and walk supported QMG streams, producing tile counts, bit/raw consumption, stream summaries, split-point overruns, and failure locations for reverse-engineering work.
+The decoder exports the RGB565 color plane by default. With `--with-alpha`, it also exports decoded alpha for observed A9LL and W2 alpha streams as RGBA PNG. For observed `QM_0x0B_A9LL` animations, `--extract-animation-frames` writes every decoded RGB frame to a sibling `*_frames` folder. Use `--inspect` to print metadata for unsupported or partially understood QMG files without decoding them. Use `--analyze` to additionally attempt decoding and walk supported QMG streams, producing tile counts, bit/raw consumption, stream summaries, split-point overruns, and failure locations for reverse-engineering work.
 
 ## QM 0x0B A9LL Stream
 
@@ -98,6 +98,14 @@ codec_tables.json -> tables.delta16_decode_b.values_signed[2:258]
 When `data[0x05] & 0x80` is set, observed A9LL files use an extra-exception branch. A clear mask bit first reads a control-stream bit. If that bit is set, the pixel is a raw 16-bit value from the raw/mask stream. Otherwise, the pixel is a delta: the command stream provides a 3-bit command, the control stream provides `command + 1` extra bits, and the index is applied to the full `delta16_decode_b` table. In this branch command `7` is an extended delta command rather than a raw-pixel command.
 
 For A9LL files, the control stream is expected to stop at the command offset and the command stream is expected to stop at the raw/mask offset. For transparent A9LL files, the color raw/mask stream is expected to stop before the alpha body at `alpha_position`. `--analyze` reports `control_limit_bits`, `command_limit_bits`, `raw_limit_offset`, and matching overrun counts; any overrun marks analysis as `warning`. Extra-exception A9LL files use the alternate walk above, so clean observed samples should no longer warn.
+
+## QM 0x0B A9LL Animation Frames
+
+Observed B5722 `OpenVG_Icon.qmg` animations are stored as concatenated `QM` records. The first record is a normal A9LL keyframe. Later records keep the animation header, store a single byte-stream offset at `header_size`, and use an A9LL inter-frame delta stream starting at `header_size + 8`.
+
+Frame 2+ is decoded against the previous full frame. Macroblocks are `16x16`. A macroblock can copy the same block from the previous frame, copy a motion-vector block, or fall back to `4x4` sub-block modes. The sub-block modes either predict from already-decoded pixels in the current frame, predict from the previous frame, copy a previous-frame block, or read literal RGB565 values from the byte stream. Edge macroblocks use literal RGB565 values for partial tiles.
+
+The current export writes RGB frames only. The animation alpha/body metadata is preserved in inspection output, but animated alpha-plane reconstruction is still outside the implemented path.
 
 ## QM 0x0B A9LL Alpha Stream
 
@@ -246,4 +254,4 @@ Observed in B5722 firmware:
 | `IFEG_95000100` | supported |
 | `IFEG_15000100` / `IFEG_150001xx` | supported |
 | `IM_0x5D` | supported for observed non-alpha B5722 files |
-| `QM_0x0B` | supported for observed B5722 A9LL, raw type `0x00` A9LL, and W2 depth-2 `.ifg` / `.qmg` files; A9LL/W2 alpha output and observed A9LL animation keyframe output are supported |
+| `QM_0x0B` | supported for observed B5722 A9LL, raw type `0x00` A9LL, and W2 depth-2 `.ifg` / `.qmg` files; A9LL/W2 alpha output and observed A9LL animation RGB frame export are supported |

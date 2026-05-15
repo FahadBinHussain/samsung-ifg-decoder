@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.19.0
+
+- Export all RGB frames from observed `QM_0x0B_A9LL` animation QMG files with `--extract-animation-frames`.
+- Add a frame splitter for concatenated animated `QM` records.
+- Port the A9LL inter-frame delta path used by later animation frames.
+
 ## 0.18.0
 
 - Decode observed `QM_0x0B` raw type `0x00` RGB565/no-alpha A9LL files.

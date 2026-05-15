@@ -15,18 +15,18 @@ Supported:
 - Type: `0x95000100`
 - Type family: `0x150001xx`
 - `IM` magic: `49 4D`, version byte `0x5D`
-- `QM` magic: `51 4D`, version byte `0x0B`, observed A9LL, A9LL `use_extra_exception`, raw type `0x00` RGB565/no-alpha A9LL, and W2 depth-2 streams
+- `QM` magic: `51 4D`, version byte `0x0B`, observed A9LL, A9LL animation, A9LL `use_extra_exception`, raw type `0x00` RGB565/no-alpha A9LL, and W2 depth-2 streams
 - Odd-pixel-count W2 assets observed in QMG UI strips
 - Output: 24-bit `.bmp` or `.png`
 - Optional RGBA `.png` output for observed `QM_0x0B_A9LL` and `QM_0x0B_W2` alpha planes
-- First-frame decode for observed `QM_0x0B_A9LL` animation keyframes
+- Full RGB frame export for observed `QM_0x0B_A9LL` animations
 - Single-file decode
 - Folder/batch decode for `.ifg` and `.qmg`
 - Optional split of `240x960` idle wallpapers into `240x320` panels
 
 Not supported yet:
 
-- Other `QM` / QMG versions and full animation frame export
+- Other `QM` / QMG versions and animation variants outside the observed A9LL frame layout
 - `IM` alpha-plane variants
 - Encoding BMP/JPG back to IFG
 
@@ -79,6 +79,12 @@ Write RGBA PNG when a supported alpha plane is present:
 
 ```bash
 python samsung_ifg_decoder.py input.ifg output.png --with-alpha
+```
+
+Export every frame from an observed A9LL QMG animation:
+
+```bash
+python samsung_ifg_decoder.py input.qmg output.png --extract-animation-frames
 ```
 
 Decode wallpapers and split `240x960` idle images into three `240x320` panels:
@@ -140,6 +146,6 @@ Users must provide their own `.ifg` / `.qmg` files. This project is intended for
 
 ## Roadmap
 
-- Broaden `QM` / QMG version coverage and full animation frame export.
+- Broaden `QM` / QMG version coverage and animation variants beyond observed A9LL frame records.
 - Investigate `IM` alpha-plane variants.
 - Add more automated tests with redistributable synthetic fixtures.

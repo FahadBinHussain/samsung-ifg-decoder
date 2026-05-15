@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-VERSION = "0.18.0"
+VERSION = "0.19.0"
 IFEG_TYPE_65000001 = 0x65000001
 IFEG_TYPE_95000100 = 0x95000100
 IFEG_TYPE_150001_BASE = 0x15000100
@@ -155,6 +155,24 @@ class QmHeader:
     current_frame_number: int = 1
     animation_delay_time: int = 0
     animation_no_repeat: int = 0
+
+
+@dataclass(frozen=True)
+class QmAnimationFrame:
+    index: int
+    offset: int
+    data: bytes
+    header: QmHeader
+
+
+@dataclass(frozen=True)
+class DecodedQmAnimationFrame:
+    index: int
+    offset: int
+    width: int
+    height: int
+    pixels: list[int]
+    header: QmHeader
 
 
 @dataclass(frozen=True)
@@ -804,6 +822,254 @@ def decode_qm_a9ll(data: bytes, header: QmHeader, tables: CodecTables) -> tuple[
     return header.width, header.height, pixels
 
 
+def copy_qm_block(
+    dst: list[int],
+    src: list[int],
+    width: int,
+    height: int,
+    dst_x: int,
+    dst_y: int,
+    src_x: int,
+    src_y: int,
+    block_w: int,
+    block_h: int,
+) -> None:
+    for yy in range(block_h):
+        for xx in range(block_w):
+            x = dst_x + xx
+            y = dst_y + yy
+            if 0 <= x < width and 0 <= y < height:
+                dst[y * width + x] = qm_ref_pixel(src, width, height, src_x + xx, src_y + yy)
+
+
+def decode_qm_a9ll_animation_delta(
+    data: bytes,
+    header: QmHeader,
+    tables: CodecTables,
+    ref_pixels: list[int],
+) -> tuple[int, int, list[int]]:
+    if header.encoder_mode != QM_ENCODER_A9LL:
+        raise ValueError("QM animation delta frames require A9LL")
+    if not header.is_animation or header.current_frame_number <= 1:
+        raise ValueError("QM animation delta decoder requires frame 2 or later")
+    if len(ref_pixels) != header.width * header.height:
+        raise ValueError("QM animation reference frame dimensions do not match")
+    if len(data) < header.header_size + 8:
+        raise ValueError("QM A9LL animation frame is too small for stream split points")
+
+    byte_stream_offset = read_u32le(data, header.header_size)
+    bit_stream_start = header.header_size + 8
+    if not (bit_stream_start <= byte_stream_offset <= len(data)):
+        raise ValueError(f"invalid QM A9LL animation split point: {byte_stream_offset}")
+
+    bits = BitReader(data[bit_stream_start:], bit_position=1)
+    bytes_in = ByteReader(data, byte_stream_offset)
+    delta_table = tables.delta16_decode_b[2:258]
+    pixels = [0] * (header.width * header.height)
+    directions = [(-1, 0), (0, -1), (-1, -1)]
+
+    def set_pixel(x: int, y: int, value: int) -> None:
+        if 0 <= x < header.width and 0 <= y < header.height:
+            pixels[y * header.width + x] = value & 0xFFFF
+
+    def decode_pixel_from(source: list[int], x: int, y: int, ref_x: int, ref_y: int) -> None:
+        ref_value = qm_ref_pixel(source, header.width, header.height, ref_x, ref_y)
+        if bits.read(1):
+            set_pixel(x, y, ref_value)
+            return
+
+        bit_count = bits.read(3)
+        if bit_count == 7:
+            set_pixel(x, y, bytes_in.read_u16le())
+            return
+
+        extra = bits.read(bit_count + 1)
+        table_index = (2 << bit_count) + extra - 2
+        if table_index >= len(delta_table):
+            raise ValueError(f"QM animation delta table index out of range: {table_index}")
+        set_pixel(x, y, ref_value + delta_table[table_index])
+
+    def copy_edge_tile(x: int, y: int, tile_w: int, tile_h: int) -> None:
+        for yy in range(tile_h):
+            for xx in range(tile_w):
+                set_pixel(x + xx, y + yy, qm_ref_pixel(pixels, header.width, header.height, x + xx - 1, y + yy))
+
+    def decode_block2(x: int, y: int) -> None:
+        mode = bits.read(2)
+        if mode < 3:
+            ref_x_delta, ref_y_delta = directions[mode]
+            for yy in range(4):
+                for xx in range(4):
+                    decode_pixel_from(pixels, x + xx, y + yy, x + xx + ref_x_delta, y + yy + ref_y_delta)
+        elif x > 0:
+            copy_edge_tile(x, y, 4, 4)
+
+    def decode_block3(x: int, y: int, mv_x: int, mv_y: int) -> None:
+        mode = bits.read(3)
+        if mode < 3:
+            ref_x_delta, ref_y_delta = directions[mode]
+            for yy in range(4):
+                for xx in range(4):
+                    decode_pixel_from(pixels, x + xx, y + yy, x + xx + ref_x_delta, y + yy + ref_y_delta)
+        elif mode == 3:
+            if x > 0:
+                copy_edge_tile(x, y, 4, 4)
+        elif mode == 4:
+            for yy in range(4):
+                for xx in range(4):
+                    decode_pixel_from(ref_pixels, x + xx, y + yy, x + xx, y + yy)
+        elif mode == 5:
+            copy_qm_block(pixels, ref_pixels, header.width, header.height, x, y, x, y, 4, 4)
+        elif mode == 6:
+            for yy in range(4):
+                for xx in range(4):
+                    decode_pixel_from(ref_pixels, x + xx, y + yy, x + xx + mv_x, y + yy + mv_y)
+        else:
+            if x + mv_x < 0 or x + mv_x + 4 > header.width or y + mv_y < 0 or y + mv_y + 4 > header.height:
+                return
+            copy_qm_block(pixels, ref_pixels, header.width, header.height, x, y, x + mv_x, y + mv_y, 4, 4)
+
+    def decode_macroblock(x: int, y: int) -> None:
+        if bits.read(1):
+            if bits.read(1):
+                copy_qm_block(pixels, ref_pixels, header.width, header.height, x, y, x, y, 16, 16)
+                return
+
+            if not bits.read(1):
+                mv_x = bits.read(8) - 0x7F
+                mv_y = bits.read(7) - 0x3F
+                if x + mv_x < 0 or x + mv_x + 16 > header.width or y + mv_y < 0 or y + mv_y + 16 > header.height:
+                    raise ValueError("QM animation motion vector points outside the reference frame")
+                if bits.read(1):
+                    copy_qm_block(pixels, ref_pixels, header.width, header.height, x, y, x + mv_x, y + mv_y, 16, 16)
+                    return
+            else:
+                mv_x = 0
+                mv_y = 0
+
+            for block_y in range(y, y + 16, 4):
+                for block_x in range(x, x + 16, 4):
+                    decode_block3(block_x, block_y, mv_x, mv_y)
+            return
+
+        for block_y in range(y, y + 16, 4):
+            for block_x in range(x, x + 16, 4):
+                decode_block2(block_x, block_y)
+
+    def decode_edge_macroblock(xpos: int, ypos: int) -> None:
+        if bits.read(1):
+            raise ValueError("QM animation skip-edge macroblocks are not supported")
+
+        for y in range(ypos, min(ypos + 16, header.height), 4):
+            for x in range(xpos, min(xpos + 16, header.width), 4):
+                if x + 4 <= header.width and y + 4 <= header.height:
+                    mode = bits.read(2)
+                    if mode < 3:
+                        ref_x_delta, ref_y_delta = directions[mode]
+                        for yy in range(4):
+                            for xx in range(4):
+                                decode_pixel_from(pixels, x + xx, y + yy, x + xx + ref_x_delta, y + yy + ref_y_delta)
+                    elif x > 0:
+                        copy_edge_tile(x, y, min(4, header.width - x), min(4, header.height - y))
+                else:
+                    for yy in range(4):
+                        for xx in range(4):
+                            if x + xx < header.width and y + yy < header.height:
+                                set_pixel(x + xx, y + yy, bytes_in.read_u16le())
+
+    for y in range(0, header.height, 16):
+        for x in range(0, header.width, 16):
+            if header.width - x >= 16 and header.height - y >= 16:
+                decode_macroblock(x, y)
+            else:
+                decode_edge_macroblock(x, y)
+
+    return header.width, header.height, pixels
+
+
+def find_qm_animation_frame_offsets(data: bytes, first_header: QmHeader) -> list[tuple[int, QmHeader]]:
+    candidates: list[tuple[int, QmHeader]] = []
+    search_offset = 0
+    while True:
+        offset = data.find(b"QM", search_offset)
+        if offset < 0:
+            break
+        search_offset = offset + 1
+        try:
+            header = parse_qm_header(data[offset:], strict=False)
+        except (struct.error, ValueError):
+            continue
+        if (
+            header.version == first_header.version
+            and header.raw_type == first_header.raw_type
+            and header.width == first_header.width
+            and header.height == first_header.height
+            and header.flags4 == first_header.flags4
+            and header.is_animation
+            and header.total_frame_number == first_header.total_frame_number
+            and 1 <= header.current_frame_number <= first_header.total_frame_number
+        ):
+            candidates.append((offset, header))
+
+    expected = 1
+    frames: list[tuple[int, QmHeader]] = []
+    for offset, header in sorted(candidates):
+        if header.current_frame_number == expected:
+            frames.append((offset, header))
+            expected += 1
+            if expected > first_header.total_frame_number:
+                break
+
+    if len(frames) != first_header.total_frame_number or not frames or frames[0][0] != 0:
+        raise ValueError(
+            "could not locate all QM animation frame records "
+            f"(found {len(frames)}, expected {first_header.total_frame_number})"
+        )
+    return frames
+
+
+def split_qm_animation_frames(data: bytes) -> list[QmAnimationFrame]:
+    first_header = parse_qm_header(data)
+    if not first_header.is_animation:
+        raise ValueError("not a QM animation")
+    if first_header.encoder_mode != QM_ENCODER_A9LL:
+        raise ValueError("QM animation frame export currently supports A9LL")
+
+    offsets = find_qm_animation_frame_offsets(data, first_header)
+    frames: list[QmAnimationFrame] = []
+    for index, (offset, header) in enumerate(offsets, start=1):
+        next_offset = offsets[index][0] if index < len(offsets) else len(data)
+        frames.append(QmAnimationFrame(index=index, offset=offset, data=data[offset:next_offset], header=header))
+    return frames
+
+
+def decode_qm_animation_frames(data: bytes, tables: CodecTables) -> list[DecodedQmAnimationFrame]:
+    frames = split_qm_animation_frames(data)
+    decoded: list[DecodedQmAnimationFrame] = []
+    ref_pixels: list[int] | None = None
+
+    for frame in frames:
+        if frame.header.current_frame_number == 1:
+            width, height, pixels = decode_qm(frame.data, tables)
+        else:
+            if ref_pixels is None:
+                raise ValueError("QM animation delta frame is missing a reference frame")
+            width, height, pixels = decode_qm_a9ll_animation_delta(frame.data, frame.header, tables, ref_pixels)
+        decoded.append(
+            DecodedQmAnimationFrame(
+                index=frame.index,
+                offset=frame.offset,
+                width=width,
+                height=height,
+                pixels=pixels,
+                header=frame.header,
+            )
+        )
+        ref_pixels = pixels
+
+    return decoded
+
+
 def unpack_qm_alpha_samples(header: QmHeader, samples: list[int]) -> list[int]:
     sample_width = (header.width + 1) // 2
     expected_samples = sample_width * header.height
@@ -1284,6 +1550,17 @@ def split_240x320_panels(output_path: Path, width: int, height: int, pixels: lis
         write_image_rgb888(panel_path, 240, 320, panel_pixels, bgr565=bgr565)
         panel_paths.append(panel_path)
     return panel_paths
+
+
+def write_qm_animation_frame_images(data: bytes, output_path: Path, tables: CodecTables, bgr565: bool) -> list[Path]:
+    decoded_frames = decode_qm_animation_frames(data, tables)
+    frame_dir = output_path.with_name(f"{output_path.stem}_frames")
+    frame_paths: list[Path] = []
+    for frame in decoded_frames:
+        frame_path = frame_dir / f"{output_path.stem}_frame_{frame.index:03d}{output_path.suffix}"
+        write_image_rgb888(frame_path, frame.width, frame.height, frame.pixels, bgr565=bgr565)
+        frame_paths.append(frame_path)
+    return frame_paths
 
 
 def default_output_for_file(input_path: Path, input_root: Path | None, output_root: Path, output_format: str) -> Path:
@@ -1784,6 +2061,7 @@ def decode_one_file(
     bgr565: bool,
     split_panels: bool,
     with_alpha: bool,
+    extract_animation_frames: bool,
 ) -> dict[str, str]:
     data = input_path.read_bytes()
     width, height, pixels, type_label = decode_samsung_image(data, tables)
@@ -1803,7 +2081,14 @@ def decode_one_file(
 
     extra_outputs: list[str] = []
     if split_panels:
-        extra_outputs = [str(p) for p in split_240x320_panels(output_path, width, height, pixels, bgr565=bgr565)]
+        extra_outputs.extend(str(p) for p in split_240x320_panels(output_path, width, height, pixels, bgr565=bgr565))
+    if extract_animation_frames and data[:2] == b"QM":
+        try:
+            header = parse_qm_header(data)
+        except ValueError:
+            header = None
+        if header is not None and header.is_animation:
+            extra_outputs.extend(str(p) for p in write_qm_animation_frame_images(data, output_path, tables, bgr565=bgr565))
 
     return {
         "source": str(input_path),
@@ -1844,6 +2129,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--bgr565", action="store_true", help="interpret decoded 16-bit pixels as BGR565")
     parser.add_argument("--split-240x320-panels", action="store_true", help="also split 240x960 wallpapers into 240x320 panels")
     parser.add_argument("--with-alpha", action="store_true", help="write PNG with decoded alpha when supported")
+    parser.add_argument("--extract-animation-frames", action="store_true", help="also export observed QM A9LL animation frames")
     parser.add_argument("--manifest", type=Path, help="write a CSV decode manifest")
     parser.add_argument("--version", action="version", version=f"samsung-ifg-decoder {VERSION}")
     return parser
@@ -1900,7 +2186,15 @@ def main(argv: list[str] | None = None) -> int:
     rows: list[dict[str, str]] = []
     for source, target in planned_outputs.items():
         try:
-            row = decode_one_file(source, target, tables, args.bgr565, args.split_240x320_panels, args.with_alpha)
+            row = decode_one_file(
+                source,
+                target,
+                tables,
+                args.bgr565,
+                args.split_240x320_panels,
+                args.with_alpha,
+                args.extract_animation_frames,
+            )
             print(f"decoded {source} -> {target} ({row['width']}x{row['height']})")
         except Exception as exc:
             row = {
