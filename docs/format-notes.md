@@ -95,7 +95,9 @@ Mixed tiles read a 16-bit mask from the raw/mask stream. A set mask bit copies f
 codec_tables.json -> tables.delta16_decode_b.values_signed[2:258]
 ```
 
-For A9LL files, the control stream is expected to stop at the command offset and the command stream is expected to stop at the raw/mask offset. For transparent A9LL files, the color raw/mask stream is expected to stop before the alpha body at `alpha_position`. `--analyze` reports `control_limit_bits`, `command_limit_bits`, `raw_limit_offset`, and matching overrun counts; any overrun marks analysis as `warning`. Observed files with the `use_extra_exception` flag can hit these warnings with the standard A9LL walk, which means the current decoded RGB plane may be corrupt even if the file did not raise a decode error.
+When `data[0x05] & 0x80` is set, observed A9LL files use an extra-exception branch. A clear mask bit first reads a control-stream bit. If that bit is set, the pixel is a raw 16-bit value from the raw/mask stream. Otherwise, the pixel is a delta: the command stream provides a 3-bit command, the control stream provides `command + 1` extra bits, and the index is applied to the full `delta16_decode_b` table. In this branch command `7` is an extended delta command rather than a raw-pixel command.
+
+For A9LL files, the control stream is expected to stop at the command offset and the command stream is expected to stop at the raw/mask offset. For transparent A9LL files, the color raw/mask stream is expected to stop before the alpha body at `alpha_position`. `--analyze` reports `control_limit_bits`, `command_limit_bits`, `raw_limit_offset`, and matching overrun counts; any overrun marks analysis as `warning`. Extra-exception A9LL files use the alternate walk above, so clean observed samples should no longer warn.
 
 ## QM 0x0B A9LL Alpha Stream
 

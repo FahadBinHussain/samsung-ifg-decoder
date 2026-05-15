@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.17.0
+
+- Decode observed A9LL `use_extra_exception` QMG streams.
+- Treat extra-exception clear-mask pixels as control-bit raw/delta decisions, with command `7` decoded through the extended delta table.
+- Update `--analyze` to walk the extra-exception A9LL path instead of reporting false stream overruns for supported files.
+
 ## 0.16.0
 
 - Report A9LL control, command, and raw stream split limits.

@@ -15,7 +15,7 @@ Supported:
 - Type: `0x95000100`
 - Type family: `0x150001xx`
 - `IM` magic: `49 4D`, version byte `0x5D`
-- `QM` magic: `51 4D`, version byte `0x0B`, observed A9LL and W2 depth-2 streams
+- `QM` magic: `51 4D`, version byte `0x0B`, observed A9LL, A9LL `use_extra_exception`, and W2 depth-2 streams
 - Odd-pixel-count W2 assets observed in QMG UI strips
 - Output: 24-bit `.bmp` or `.png`
 - Optional RGBA `.png` output for observed `QM_0x0B_A9LL` and `QM_0x0B_W2` alpha planes
@@ -105,7 +105,7 @@ Analyze decode diagnostics without writing images:
 python samsung_ifg_decoder.py input_folder --analyze --recursive --manifest analyze_manifest.csv
 ```
 
-For A9LL QMG files, analysis also reports expected control, command, and raw stream limits, then warns when the current stream walk overruns a split point. This is useful for spotting unsupported `use_extra_exception` resources that can otherwise produce corrupt-looking output.
+For A9LL QMG files, analysis also reports expected control, command, and raw stream limits, then warns when the current stream walk overruns a split point. The observed `use_extra_exception` A9LL branch is decoded and analyzed with its separate raw/delta decision bit path.
 
 ## What Files Do
 

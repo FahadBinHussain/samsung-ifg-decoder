@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-VERSION = "0.16.0"
+VERSION = "0.17.0"
 IFEG_TYPE_65000001 = 0x65000001
 IFEG_TYPE_95000100 = 0x95000100
 IFEG_TYPE_150001_BASE = 0x15000100
@@ -19,6 +19,7 @@ IFEG_TYPE_150001_MASK = 0xFFFFFF00
 QM_VERSION_0B = 0x0B
 QM_ENCODER_A9LL = 0
 QM_ENCODER_W2_PASS = 1
+QM_FLAG_USE_EXTRA_EXCEPTION = 0x80
 SUPPORTED_IFEG_TYPE_LABELS = ("0x65000001", "0x95000100", "0x150001xx")
 SUPPORTED_INPUT_LABELS = (
     "IFEG 0x65000001",
@@ -652,6 +653,81 @@ def qm_ref_pixel(pixels: list[int], width: int, height: int, x: int, y: int) -> 
     return 0
 
 
+def qm_has_extra_exception(header: QmHeader) -> bool:
+    return bool(header.flags5 & QM_FLAG_USE_EXTRA_EXCEPTION)
+
+
+def decode_qm_a9ll_extra_exception(
+    data: bytes,
+    header: QmHeader,
+    tables: CodecTables,
+    command_offset: int,
+    raw_offset: int,
+    stream_start: int,
+) -> tuple[int, int, list[int]]:
+    raw_limit = qm_a9ll_color_raw_limit(data, header, raw_offset)
+    if not (stream_start <= command_offset <= raw_offset <= raw_limit <= len(data)):
+        raise ValueError(
+            "invalid QM A9LL extra-exception split points: "
+            f"{stream_start}, {command_offset}, {raw_offset}, {raw_limit}, size={len(data)}"
+        )
+
+    control_bits = BitReader(data[stream_start:command_offset], bit_position=1)
+    command_bits = BitReader(data[command_offset:raw_offset], bit_position=1)
+    raw_words = ByteReader(data[:raw_limit], raw_offset)
+    delta_table = tables.delta16_decode_b
+    pixels = [0] * (header.width * header.height)
+    directions = [(-1, 0), (0, -1), (-1, -1)]
+
+    def set_pixel(x: int, y: int, value: int) -> None:
+        if 0 <= x < header.width and 0 <= y < header.height:
+            pixels[y * header.width + x] = value & 0xFFFF
+
+    def copy_edge_tile(x: int, y: int, tile_w: int, tile_h: int) -> None:
+        for yy in range(tile_h):
+            for xx in range(tile_w):
+                set_pixel(x + xx, y + yy, qm_ref_pixel(pixels, header.width, header.height, x + xx - 1, y + yy))
+
+    for y in range(0, header.height, 4):
+        for x in range(0, header.width, 4):
+            tile_w = min(4, header.width - x)
+            tile_h = min(4, header.height - y)
+            mode = control_bits.read(2)
+
+            if mode < 3:
+                mask = raw_words.read_u16le()
+                mask_bit = 0
+                ref_x_delta, ref_y_delta = directions[mode]
+                for yy in range(4):
+                    for xx in range(4):
+                        if x + xx >= header.width or y + yy >= header.height:
+                            continue
+
+                        ref_value = qm_ref_pixel(
+                            pixels,
+                            header.width,
+                            header.height,
+                            x + xx + ref_x_delta,
+                            y + yy + ref_y_delta,
+                        )
+                        if mask & (1 << mask_bit):
+                            set_pixel(x + xx, y + yy, ref_value)
+                        elif control_bits.read(1):
+                            set_pixel(x + xx, y + yy, raw_words.read_u16le())
+                        else:
+                            command = command_bits.read(3)
+                            extra = control_bits.read(command + 1)
+                            table_index = (2 << command) + extra
+                            if table_index >= len(delta_table):
+                                raise ValueError(f"QM A9LL delta table index out of range: {table_index}")
+                            set_pixel(x + xx, y + yy, ref_value + delta_table[table_index])
+                        mask_bit += 1
+            elif x > 0:
+                copy_edge_tile(x, y, tile_w, tile_h)
+
+    return header.width, header.height, pixels
+
+
 def decode_qm_a9ll(data: bytes, header: QmHeader, tables: CodecTables) -> tuple[int, int, list[int]]:
     if len(data) < header.header_size + 8:
         raise ValueError("QM A9LL file is too small for stream split points")
@@ -661,6 +737,9 @@ def decode_qm_a9ll(data: bytes, header: QmHeader, tables: CodecTables) -> tuple[
     stream_start = header.header_size + 8
     if not (stream_start <= command_offset <= raw_offset <= len(data)):
         raise ValueError(f"invalid QM A9LL stream split points: {command_offset}, {raw_offset}")
+
+    if qm_has_extra_exception(header):
+        return decode_qm_a9ll_extra_exception(data, header, tables, command_offset, raw_offset, stream_start)
 
     control_bits = BitReader(data[stream_start:], bit_position=1)
     command_bits = BitReader(data[command_offset:], bit_position=1)
@@ -1359,7 +1438,7 @@ def inspect_samsung_image(data: bytes) -> dict[str, str]:
                 notes.append("RGB565/no-alpha raw type; metadata-only support")
             elif header.raw_type != 0x03:
                 notes.append("unsupported QM raw type")
-            if header.flags5 & 0x80:
+            if qm_has_extra_exception(header):
                 notes.append("use_extra_exception flag set")
             if header.is_animation and header.current_frame_number != 1:
                 notes.append("animation delta frame")
@@ -1379,8 +1458,6 @@ def inspect_samsung_image(data: bytes) -> dict[str, str]:
                         f"w2_run_size={read_u32le(data, header.header_size + 8)}"
                     )
             supported = yes_no(can_attempt_decode)
-            if can_attempt_decode and header.encoder_mode == QM_ENCODER_A9LL and header.flags5 & 0x80:
-                supported = "partial"
             row.update(
                 {
                     "family": "QM",
@@ -1460,10 +1537,15 @@ def analyze_qm_a9ll_stream(data: bytes, header: QmHeader) -> dict[str, str]:
             f"{control_start}, {command_start}, {raw_start}, size={len(data)}"
         )
 
-    control_bits = BitReader(data[control_start:], bit_position=1)
-    command_bits = BitReader(data[command_start:], bit_position=1)
-    raw_words = ByteReader(data, raw_start)
     raw_limit = qm_a9ll_color_raw_limit(data, header, raw_start)
+    if qm_has_extra_exception(header):
+        control_bits = BitReader(data[control_start:command_start], bit_position=1)
+        command_bits = BitReader(data[command_start:raw_start], bit_position=1)
+        raw_words = ByteReader(data[:raw_limit], raw_start)
+    else:
+        control_bits = BitReader(data[control_start:], bit_position=1)
+        command_bits = BitReader(data[command_start:], bit_position=1)
+        raw_words = ByteReader(data, raw_start)
 
     mixed_tiles = 0
     copy_tiles = 0
@@ -1494,6 +1576,14 @@ def analyze_qm_a9ll_stream(data: bytes, header: QmHeader) -> dict[str, str]:
                                 continue
                             if mask & (1 << mask_bit):
                                 copied_pixels += 1
+                            elif qm_has_extra_exception(header):
+                                if control_bits.read(1):
+                                    raw_words.read_u16le()
+                                    literal_pixels += 1
+                                else:
+                                    command = command_bits.read(3)
+                                    control_bits.read(command + 1)
+                                    delta_pixels += 1
                             else:
                                 command = command_bits.read(3)
                                 if command == 7:

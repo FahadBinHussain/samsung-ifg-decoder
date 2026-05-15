@@ -164,6 +164,34 @@ class AnalyzeTests(unittest.TestCase):
         self.assertIn("command stream overran", row["analysis_error"])
 
 
+class QmA9llTests(unittest.TestCase):
+    def test_use_extra_exception_decodes_raw_flag_and_command_7_delta(self) -> None:
+        tables = decoder.CodecTables([], [], [0] * 512)
+        tables.delta16_decode_b[256] = 1
+        data = b"QM" + bytes([decoder.QM_VERSION_0B, 0x03, 0x00, decoder.QM_FLAG_USE_EXTRA_EXCEPTION])
+        data += struct.pack("<HHBBI", 4, 4, 0, 0, 31)
+        data += struct.pack("<II", 26, 27)
+        data += b"\x20\x00"
+        data += b"\xE0"
+        data += b"\xFC\xFF"
+        data += b"\x34\x12"
+
+        width, height, pixels, type_label = decoder.decode_samsung_image(data, tables)
+        self.assertEqual((width, height), (4, 4))
+        self.assertEqual(type_label, "QM_0x0B_A9LL")
+        self.assertEqual(pixels[:4], [0x1234, 0x1235, 0x1235, 0x1235])
+
+        row = decoder.analyze_samsung_image(data, tables)
+        self.assertEqual(row["decode_status"], "decoded")
+        self.assertEqual(row["analysis_status"], "ok")
+        self.assertEqual(row["literal_pixels"], "1")
+        self.assertEqual(row["delta_pixels"], "1")
+        self.assertEqual(row["command_bits_read"], "3")
+        self.assertEqual(row["control_bits_read"], "12")
+        self.assertEqual(row["raw_bytes_read"], "4")
+        self.assertEqual(row["raw_overrun_bytes"], "0")
+
+
 class ColorTests(unittest.TestCase):
     def test_rgb565_to_rgb888(self) -> None:
         self.assertEqual(decoder.rgb565_to_rgb888(0xF800), (255, 0, 0))
