@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.20.0
+
+- Report `IM_0x5D` near-lossless, alpha-plane, and extended-header flags separately in `--inspect`.
+- Document the B5722 `IM_0x5D` variant scan and the lack of a real alpha-plane sample in the recovered corpus.
+- Keep suspected `IM` alpha-plane files inspect-only until a decodable sample is available.
+
 ## 0.19.0
 
 - Export all RGB frames from observed `QM_0x0B_A9LL` animation QMG files with `--extract-animation-frames`.

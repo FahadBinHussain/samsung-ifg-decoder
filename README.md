@@ -16,6 +16,7 @@ Supported:
 - Type family: `0x150001xx`
 - `IM` magic: `49 4D`, version byte `0x5D`
 - `QM` magic: `51 4D`, version byte `0x0B`, observed A9LL, A9LL animation, A9LL `use_extra_exception`, raw type `0x00` RGB565/no-alpha A9LL, and W2 depth-2 streams
+- `--inspect` reports `IM_0x5D` near-lossless, alpha-plane, and extended-header flags
 - Odd-pixel-count W2 assets observed in QMG UI strips
 - Output: 24-bit `.bmp` or `.png`
 - Optional RGBA `.png` output for observed `QM_0x0B_A9LL` and `QM_0x0B_W2` alpha planes
@@ -27,7 +28,7 @@ Supported:
 Not supported yet:
 
 - Other `QM` / QMG versions and animation variants outside the observed A9LL frame layout
-- `IM` alpha-plane variants
+- Real `IM_0x5D` alpha-plane samples; no B5722 sample with the suspected alpha flag has been found yet
 - Encoding BMP/JPG back to IFG
 
 ## Requirements
@@ -147,5 +148,5 @@ Users must provide their own `.ifg` / `.qmg` files. This project is intended for
 ## Roadmap
 
 - Broaden `QM` / QMG version coverage and animation variants beyond observed A9LL frame records.
-- Investigate `IM` alpha-plane variants.
+- Collect and decode real `IM_0x5D` alpha-plane samples.
 - Add more automated tests with redistributable synthetic fixtures.

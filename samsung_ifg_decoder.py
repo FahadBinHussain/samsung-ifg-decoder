@@ -11,11 +11,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-VERSION = "0.19.0"
+VERSION = "0.20.0"
 IFEG_TYPE_65000001 = 0x65000001
 IFEG_TYPE_95000100 = 0x95000100
 IFEG_TYPE_150001_BASE = 0x15000100
 IFEG_TYPE_150001_MASK = 0xFFFFFF00
+IM_FLAG_NEAR_LOSSLESS = 0x20
+IM_FLAG_ALPHA_PLANE = 0x80
+IM_FLAG_EXTENDED_HEADER = 0x40
 QM_VERSION_0B = 0x0B
 QM_ENCODER_A9LL = 0
 QM_ENCODER_W2_PASS = 1
@@ -280,12 +283,12 @@ def parse_im_header(data: bytes) -> ImHeader:
     version = data[7]
     if version != 0x5D:
         raise ValueError(f"unsupported IM version 0x{version:02x}; this release supports IM 0x5D")
-    if flags & 0x80:
+    if flags & IM_FLAG_ALPHA_PLANE:
         raise ValueError("IM alpha-plane files are not supported yet")
     if width <= 0 or height <= 0:
         raise ValueError(f"invalid dimensions {width}x{height}")
 
-    stream_header_offset = 13 if data[8] & 0x40 else 9
+    stream_header_offset = 13 if data[8] & IM_FLAG_EXTENDED_HEADER else 9
     if len(data) < stream_header_offset + 8:
         raise ValueError("file is too small for an IM stream header")
 
@@ -306,7 +309,7 @@ def parse_im_header(data: bytes) -> ImHeader:
         stream_header_offset=stream_header_offset,
         command_offset=command_offset,
         raw_offset=raw_offset,
-        near_lossless=bool(flags & 0x20),
+        near_lossless=bool(flags & IM_FLAG_NEAR_LOSSLESS),
     )
 
 
@@ -1676,16 +1679,19 @@ def inspect_samsung_image(data: bytes) -> dict[str, str]:
             height = read_u16le(data, 4) if len(data) >= 6 else 0
             flags = data[6] if len(data) > 6 else 0
             version = data[7] if len(data) > 7 else 0
-            stream_header_offset = 13 if len(data) > 8 and data[8] & 0x40 else 9
+            extended_header = bool(len(data) > 8 and data[8] & IM_FLAG_EXTENDED_HEADER)
+            alpha_plane = bool(flags & IM_FLAG_ALPHA_PLANE)
+            near_lossless = bool(flags & IM_FLAG_NEAR_LOSSLESS)
+            stream_header_offset = 13 if extended_header else 9
             command_offset = raw_offset = ""
             if len(data) >= stream_header_offset + 8:
                 command_offset = str(read_u32le(data, stream_header_offset))
                 raw_offset = str(read_u32le(data, stream_header_offset + 4))
-            supported = version == 0x5D and not (flags & 0x80) and width > 0 and height > 0
+            supported = version == 0x5D and not alpha_plane and width > 0 and height > 0
             notes: list[str] = []
             if version != 0x5D:
                 notes.append("unsupported IM version")
-            if flags & 0x80:
+            if alpha_plane:
                 notes.append("IM alpha-plane variant")
             row.update(
                 {
@@ -1694,7 +1700,10 @@ def inspect_samsung_image(data: bytes) -> dict[str, str]:
                     "height": str(height) if height else "",
                     "type": f"IM_0x{version:02X}",
                     "version": f"0x{version:02X}",
-                    "flags": f"flags=0x{flags:02X};near_lossless={yes_no(bool(flags & 0x20))}",
+                    "flags": (
+                        f"flags=0x{flags:02X};near_lossless={yes_no(near_lossless)};"
+                        f"alpha_plane={yes_no(alpha_plane)};extended_header={yes_no(extended_header)}"
+                    ),
                     "header_size": str(stream_header_offset + 8),
                     "command_offset": command_offset,
                     "raw_offset": raw_offset,

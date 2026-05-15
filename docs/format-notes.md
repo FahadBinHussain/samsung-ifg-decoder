@@ -25,7 +25,7 @@ Observed B5722 `IM` files begin with:
 | `0x00` | 2 | ASCII magic `IM` |
 | `0x02` | 2 | width, little-endian `u16` |
 | `0x04` | 2 | height, little-endian `u16` |
-| `0x06` | 1 | flags; bit `0x20` selects the near-lossless/raw-flag pixel path |
+| `0x06` | 1 | flags; bit `0x20` selects the near-lossless/raw-flag pixel path; bit `0x80` is reserved here as a suspected alpha-plane marker |
 | `0x07` | 1 | version; supported value `0x5D` |
 | `0x08` | 1 | layout flags; bit `0x40` moves the stream header from `0x09` to `0x0d` |
 
@@ -36,7 +36,7 @@ For non-alpha `IM_0x5D` files, the stream header contains two little-endian spli
 | `data[0x08] & 0x40 == 0` | `0x09` | `0x11` | `u32 @ 0x09` | `u32 @ 0x0d` |
 | `data[0x08] & 0x40 != 0` | `0x0d` | `0x15` | `u32 @ 0x0d` | `u32 @ 0x11` |
 
-`IM` files with the high bit set in `data[0x06]` appear to include alpha-plane metadata and are not implemented yet.
+The local B5722 corpus used during development contains 98 `IM_0x5D` files in the unpacked TFS: 49 with the extended-header bit, 46 with the near-lossless bit, and none with `data[0x06] & 0x80`. The decoder therefore still rejects the suspected alpha-plane variant, but `--inspect` reports `near_lossless`, `alpha_plane`, and `extended_header` separately so future samples can be sorted without attempting decode.
 
 ## QM 0x0B Header
 
@@ -253,5 +253,5 @@ Observed in B5722 firmware:
 | `IFEG_65000001` | supported |
 | `IFEG_95000100` | supported |
 | `IFEG_15000100` / `IFEG_150001xx` | supported |
-| `IM_0x5D` | supported for observed non-alpha B5722 files |
+| `IM_0x5D` | supported for observed non-alpha B5722 files; suspected alpha-plane flag is inspect-only until a real sample is available |
 | `QM_0x0B` | supported for observed B5722 A9LL, raw type `0x00` A9LL, and W2 depth-2 `.ifg` / `.qmg` files; A9LL/W2 alpha output and observed A9LL animation RGB frame export are supported |

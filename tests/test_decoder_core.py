@@ -72,6 +72,21 @@ class AlphaPackingTests(unittest.TestCase):
 
 
 class InspectTests(unittest.TestCase):
+    def test_inspect_reports_im_alpha_flag_without_decoding(self) -> None:
+        data = b"IM" + struct.pack("<HHBB", 4, 4, decoder.IM_FLAG_ALPHA_PLANE | decoder.IM_FLAG_NEAR_LOSSLESS, 0x5D)
+        data += bytes([decoder.IM_FLAG_EXTENDED_HEADER])
+        data += b"\x00" * 4
+        data += struct.pack("<II", 21, 21)
+
+        row = decoder.inspect_samsung_image(data)
+
+        self.assertEqual(row["family"], "IM")
+        self.assertEqual(row["supported"], "no")
+        self.assertIn("near_lossless=yes", row["flags"])
+        self.assertIn("alpha_plane=yes", row["flags"])
+        self.assertIn("extended_header=yes", row["flags"])
+        self.assertIn("IM alpha-plane variant", row["notes"])
+
     def test_inspect_reports_qm_raw_type_0_as_supported_no_alpha(self) -> None:
         data = b"QM" + bytes([decoder.QM_VERSION_0B, 0x00, 0x00, 0xC0])
         data += struct.pack("<HHBB", 8, 13, 0, 0)
