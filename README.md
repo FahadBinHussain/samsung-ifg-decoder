@@ -36,6 +36,10 @@ Not supported yet:
 - Python 3.10 or newer
 - No third-party Python packages
 
+## Synthetic Fixtures
+
+The `samples/synthetic` folder contains tiny hand-built `.hex` fixtures for public tests and demos. They cover representative `IM_0x5D`, A9LL QMG, and W2 QMG paths without redistributing Samsung firmware or decoded assets.
+
 ## Test
 
 Run the synthetic regression suite:
@@ -149,4 +153,4 @@ Users must provide their own `.ifg` / `.qmg` files. This project is intended for
 
 - Broaden `QM` / QMG version coverage and animation variants beyond observed A9LL frame records.
 - Collect and decode real `IM_0x5D` alpha-plane samples.
-- Add more automated tests with redistributable synthetic fixtures.
+- Expand redistributable synthetic fixture coverage for more edge cases.

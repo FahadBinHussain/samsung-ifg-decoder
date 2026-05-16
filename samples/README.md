@@ -2,7 +2,9 @@
 
 This repository intentionally does not include Samsung firmware files, proprietary wallpapers, or decoded Samsung assets.
 
-To test the decoder, provide your own `.ifg` files extracted from firmware you are allowed to inspect.
+The `synthetic/` folder contains tiny hand-built hex fixtures for public tests and demos. They are redistributable because they were created from the documented stream rules, not copied from firmware.
+
+For real-world testing, provide your own `.ifg` / `.qmg` files extracted from firmware you are allowed to inspect.
 
 Known working B5722 paths include:
 

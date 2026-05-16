@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.21.0
+
+- Add redistributable synthetic hex fixtures for `IM_0x5D`, A9LL QMG, and W2 QMG paths.
+- Add fixture-file regression tests that load samples from `samples/synthetic`.
+- Document how to materialize the synthetic hex fixtures for local CLI demos.
+
 ## 0.20.0
 
 - Report `IM_0x5D` near-lossless, alpha-plane, and extended-header flags separately in `--inspect`.
